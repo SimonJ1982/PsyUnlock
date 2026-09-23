@@ -71,7 +71,7 @@ import kotlin.time.Duration.Companion.seconds
 
 // ---- Haptic feedback ----
 fun performHapticFeedback(context: Context) {
-    val vibrator = context.getSystemService(Vibrator::class.java) ?: return
+    val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
     vibrator.vibrate(VibrationEffect.createOneShot(30, VibrationEffect.DEFAULT_AMPLITUDE))
 }
 
@@ -86,7 +86,7 @@ class MainActivity : ComponentActivity() {
         val wrongAttemptsLimit: Int,
         val unlockMethod: String,
         val hapticFeedbackEnabled: Boolean,
-        val unlockReadyShownBy: String,
+        val unlockReadyIndicator: String,
         val onLaunchScreen: String
     )
 
@@ -98,7 +98,7 @@ class MainActivity : ComponentActivity() {
             wrongAttemptsLimit = prefs.getInt("wrong_attempts_limit", 3).coerceIn(1, 20),
             unlockMethod = prefs.getString("unlock_method", "volume_up")!!,
             hapticFeedbackEnabled = prefs.getBoolean("haptic_feedback_enabled", true),
-            unlockReadyShownBy = prefs.getString("unlock_ready_shown_by", "remove_comma")!!,
+            unlockReadyIndicator = prefs.getString("unlock_ready_indicator", "remove_comma")!!,
             onLaunchScreen = prefs.getString("on_launch_screen", "home")!!
         )
     }
@@ -106,14 +106,13 @@ class MainActivity : ComponentActivity() {
     private fun saveSettings(transform: (SettingsSnapshot) -> SettingsSnapshot) {
         val updated = transform(loadAllSettings())
         prefs.edit {
-            if (updated.backgroundUri == null) remove("background_uri")
-            else putString("background_uri", updated.backgroundUri)
+            putString("background_uri", updated.backgroundUri)
             putString("lock_screen_text_mode", updated.lockScreenTextMode)
             putInt("pin_length", updated.pinLength)
             putInt("wrong_attempts_limit", updated.wrongAttemptsLimit)
             putString("unlock_method", updated.unlockMethod)
             putBoolean("haptic_feedback_enabled", updated.hapticFeedbackEnabled)
-            putString("unlock_ready_shown_by", updated.unlockReadyShownBy)
+            putString("unlock_ready_indicator", updated.unlockReadyIndicator)
             putString("on_launch_screen", updated.onLaunchScreen)
         }
     }
@@ -125,7 +124,7 @@ class MainActivity : ComponentActivity() {
         FakeLockScreenState.fullReset()
 
         val initialScreen = when (loadAllSettings().onLaunchScreen) {
-            "no_home" -> "lockscreen"
+            "lockscreen" -> "lockscreen"
             else -> "home"
         }
 
@@ -136,18 +135,18 @@ class MainActivity : ComponentActivity() {
                 onSaveBackground = { uri -> saveSettings { it.copy(backgroundUri = uri) } },
                 onSaveLockScreenTextMode = { mode ->
                     saveSettings { current ->
-                        val newShownBy = if (mode != "date_time" && current.unlockReadyShownBy == "remove_comma") "entry_key" else current.unlockReadyShownBy
-                        current.copy(lockScreenTextMode = mode, unlockReadyShownBy = newShownBy)
+                        val newIndicator = if (mode != "date_time" && current.unlockReadyIndicator == "remove_comma") "enter_key_dot" else current.unlockReadyIndicator
+                        current.copy(lockScreenTextMode = mode, unlockReadyIndicator = newIndicator)
                     }
                 },
                 onSavePinLength = { len -> saveSettings { it.copy(pinLength = len.coerceIn(4, 6)) } },
                 onSaveWrongAttemptsLimit = { lim -> saveSettings { it.copy(wrongAttemptsLimit = lim.coerceIn(1, 20)) } },
                 onSaveUnlockMethod = { method -> saveSettings { it.copy(unlockMethod = method) } },
                 onSaveHapticEnabled = { en -> saveSettings { it.copy(hapticFeedbackEnabled = en) } },
-                onSaveUnlockReadyShownBy = { opt ->
+                onSaveUnlockReadyIndicator = { indicator ->
                     saveSettings { current ->
-                        val valid = opt != "remove_comma" || current.lockScreenTextMode == "date_time"
-                        if (valid) current.copy(unlockReadyShownBy = opt) else current
+                        val valid = indicator != "remove_comma" || current.lockScreenTextMode == "date_time"
+                        if (valid) current.copy(unlockReadyIndicator = indicator) else current
                     }
                 },
                 onSaveOnLaunchScreen = { screen -> saveSettings { it.copy(onLaunchScreen = screen) } },
@@ -240,7 +239,7 @@ fun LockScreenApp(
     onSaveWrongAttemptsLimit: (Int) -> Unit,
     onSaveUnlockMethod: (String) -> Unit,
     onSaveHapticEnabled: (Boolean) -> Unit,
-    onSaveUnlockReadyShownBy: (String) -> Unit,
+    onSaveUnlockReadyIndicator: (String) -> Unit,
     onSaveOnLaunchScreen: (String) -> Unit,
     onUnlock: () -> Unit
 ) {
@@ -255,10 +254,7 @@ fun LockScreenApp(
         "home" -> HomeScreen(
             onInstructions = { currentScreen = "instructions" },
             onSettings = { currentScreen = "settings" },
-            onPerform = {
-                FakeLockScreenState.fullReset()
-                currentScreen = "lockscreen"
-            },
+            onPerform = { FakeLockScreenState.fullReset(); currentScreen = "lockscreen" },
             onPsyUnlock4PIN = { currentScreen = "psy_keypad" },
             onPsyUnlock6PIN = { currentScreen = "psy_keypad" },
             onPsyUnlockSettings = { currentScreen = "psy_settings" }
@@ -273,13 +269,10 @@ fun LockScreenApp(
             onSaveWrongAttemptsLimit = onSaveWrongAttemptsLimit,
             onSaveUnlockMethod = onSaveUnlockMethod,
             onSaveHapticEnabled = onSaveHapticEnabled,
-            onSaveUnlockReadyShownBy = onSaveUnlockReadyShownBy,
+            onSaveUnlockReadyIndicator = onSaveUnlockReadyIndicator,
             onSaveOnLaunchScreen = onSaveOnLaunchScreen,
             onBack = { currentScreen = "home" },
-            onPerform = {
-                FakeLockScreenState.fullReset()
-                currentScreen = "lockscreen"
-            }
+            onPerform = { FakeLockScreenState.fullReset(); currentScreen = "lockscreen" }
         )
         "lockscreen" -> LockScreenEntry(
             settings = settings,
@@ -397,7 +390,7 @@ fun PsyKeypadScreen(onBack: () -> Unit) {
     val spacing = 22.dp
     val numColor = Color(0xFF707070)
     val numTextSize = 26.67.sp
-    val smallTextSize = numTextSize * 0.75
+    val smallTextSize = numTextSize * 0.75f
 
     Box(modifier = Modifier.fillMaxSize().background(bgGradient), contentAlignment = Alignment.Center) {
         Column(
@@ -472,6 +465,8 @@ fun PsyKeypadScreen(onBack: () -> Unit) {
 fun PsyUnlockSettingsScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
     var attemptLimit by remember { mutableIntStateOf(3) }
+    var waitTimeSeconds by remember { mutableIntStateOf(0) }
+    var waitTimeStepSeconds by remember { mutableIntStateOf(1) }
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF02060C))) {
         Column(
@@ -539,9 +534,78 @@ fun PsyUnlockSettingsScreen(onBack: () -> Unit) {
             Spacer(modifier = Modifier.height(28.dp))
             Text("Wait time", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(modifier = Modifier.height(12.dp))
-            SettingsOption("Option A", selected = false) { performHapticFeedback(ctx) }
-            Spacer(modifier = Modifier.height(10.dp))
-            SettingsOption("Option B", selected = false) { performHapticFeedback(ctx) }
+            Row(
+                modifier = Modifier.fillMaxWidth(0.85f),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier.size(58.dp)
+                        .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                        .clickable {
+                            performHapticFeedback(ctx)
+                            if (waitTimeSeconds > 0) waitTimeSeconds = (waitTimeSeconds - waitTimeStepSeconds).coerceAtLeast(0)
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("−", color = Color.White, fontSize = 28.sp)
+                }
+                Box(
+                    modifier = Modifier.size(96.dp, 58.dp)
+                        .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "$waitTimeSeconds s",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                Box(
+                    modifier = Modifier.size(58.dp)
+                        .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                        .clickable {
+                            performHapticFeedback(ctx)
+                            waitTimeSeconds += waitTimeStepSeconds
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("+", color = Color.White, fontSize = 28.sp)
+                }
+            }
+
+            // ===== ONLY NEW CODE ADDED HERE =====
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(0.85f),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                listOf(5, 10, 30).forEach { sec ->
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(58.dp)
+                            .background(
+                                if (waitTimeStepSeconds == sec) Color(0xFF2A3A4F) else Color(0xFF1E2D42),
+                                RoundedCornerShape(18.dp)
+                            )
+                            .clickable {
+                                performHapticFeedback(ctx)
+                                waitTimeStepSeconds = sec
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "$sec s",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+            // ===== END OF NEW CODE =====
 
             Spacer(modifier = Modifier.height(28.dp))
             Box(
@@ -753,10 +817,10 @@ fun LockScreenEntry(
     val gap = 22.dp
     val pinDotDiameter = 22.dp
     val keyTextSize = 26.67.sp
-    val smallTextSize = keyTextSize * 0.75
+    val smallTextSize = keyTextSize * 0.75f
     val keyBackgroundAlpha = if (settings.backgroundUri != null && (screenRevealed || progressFraction > 0.3f)) 1f else 0.6f
     val keyColor = Color(0xFF707070).copy(alpha = keyBackgroundAlpha)
-    val keypadVerticalShift = (-57).dp
+    val keypadVerticalOffset = (-57).dp
 
     val volumeUpArmed = FakeLockScreenState.volumeUpPressed
     val isUnlockReady = when (settings.unlockMethod) {
@@ -764,9 +828,9 @@ fun LockScreenEntry(
         "wrong_attempts" -> wrongAttemptCount.intValue >= settings.wrongAttemptsLimit
         else -> false
     }
-    val showCommaRemoval = settings.unlockReadyShownBy == "remove_comma" &&
+    val showCommaRemoval = settings.unlockReadyIndicator == "remove_comma" &&
             settings.lockScreenTextMode == "date_time" && isUnlockReady
-    val showEnterIndicator = isUnlockReady && !showCommaRemoval
+    val showEnterDot = isUnlockReady && !showCommaRemoval
 
     LaunchedEffect(screenRevealed) {
         faceNotRecognized = false
@@ -784,7 +848,7 @@ fun LockScreenEntry(
     }
 
     DisposableEffect(Unit) {
-        val handler = Handler(Looper.getMainLooper())
+        val handler = android.os.Handler(Looper.getMainLooper())
         val ticker = object : Runnable {
             override fun run() {
                 currentTime = Date()
@@ -801,9 +865,9 @@ fun LockScreenEntry(
     val dateFull = remember(currentTime) {
         java.text.SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(currentTime)
     }
-    val commaPosition = dateFull.indexOf(',')
-    val dayNamePortion = if (commaPosition >= 0) dateFull.take(commaPosition) else dateFull
-    val dateRemainder = if (commaPosition >= 0) dateFull.drop(commaPosition + 2) else ""
+    val commaIndex = dateFull.indexOf(',')
+    val datePart = if (commaIndex >= 0) dateFull.take(commaIndex) else dateFull
+    val dateRemainder = if (commaIndex >= 0) dateFull.drop(commaIndex + 2) else ""
 
     fun clearPin() { enteredPin = "" }
     fun appendDigit(digit: String) {
@@ -859,9 +923,9 @@ fun LockScreenEntry(
     var backgroundBitmap by remember(settings.backgroundUri) { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(settings.backgroundUri) {
         backgroundBitmap = null
-        settings.backgroundUri?.let { uriString ->
+        settings.backgroundUri?.let { uriStr ->
             runCatching {
-                val stream = ctx.contentResolver.openInputStream(uriString.toUri())
+                val stream = ctx.contentResolver.openInputStream(uriStr.toUri())
                 BitmapFactory.decodeStream(stream)?.asImageBitmap()
             }.getOrNull()?.let { backgroundBitmap = it }
         }
@@ -916,11 +980,9 @@ fun LockScreenEntry(
                 Text(timeDisplay, color = Color.White, fontSize = 82.sp, fontWeight = FontWeight.Light)
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(dayNamePortion, color = Color.White.copy(alpha = 0.9f), fontSize = 21.sp)
+                    Text(datePart, color = Color.White.copy(alpha = 0.9f), fontSize = 21.sp)
                     if (!showCommaRemoval) {
                         Text(", ", color = Color.White.copy(alpha = 0.9f), fontSize = 21.sp)
-                    } else {
-                        Text("  ", color = Color.White.copy(alpha = 0.0f), fontSize = 21.sp)
                     }
                     Text(dateRemainder, color = Color.White.copy(alpha = 0.9f), fontSize = 21.sp)
                 }
@@ -947,11 +1009,9 @@ fun LockScreenEntry(
                     if (settings.lockScreenTextMode == "date_time") {
                         Text(timeDisplay, color = Color.White, fontSize = 64.sp, fontWeight = FontWeight.Light)
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(dayNamePortion, color = Color.White.copy(alpha = 0.75f), fontSize = 17.sp)
+                            Text(datePart, color = Color.White.copy(alpha = 0.75f), fontSize = 17.sp)
                             if (!showCommaRemoval) {
                                 Text(", ", color = Color.White.copy(alpha = 0.75f), fontSize = 17.sp)
-                            } else {
-                                Text("  ", color = Color.White.copy(alpha = 0.0f), fontSize = 17.sp)
                             }
                             Text(dateRemainder, color = Color.White.copy(alpha = 0.75f), fontSize = 17.sp)
                         }
@@ -1005,7 +1065,7 @@ fun LockScreenEntry(
                 Spacer(modifier = Modifier.weight(1f))
 
                 Box(
-                    modifier = Modifier.offset(y = keypadOffset + keypadVerticalShift),
+                    modifier = Modifier.offset(y = keypadOffset + keypadVerticalOffset),
                     contentAlignment = Alignment.TopCenter
                 ) {
                     Column(
@@ -1061,9 +1121,11 @@ fun LockScreenEntry(
                         ) {
                             Box(modifier = Modifier.size(keySize), contentAlignment = Alignment.Center) {
                                 Box(
-                                    modifier = Modifier.size(smallKeySize).clickable {
-                                        if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
-                                        deleteLast()
+                                    modifier = Modifier.size(smallKeySize).pointerInput(Unit) {
+                                        detectTapGestures(onTap = {
+                                            if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
+                                            deleteLast()
+                                        })
                                     },
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -1076,14 +1138,16 @@ fun LockScreenEntry(
                             }
                             Box(modifier = Modifier.size(keySize), contentAlignment = Alignment.Center) {
                                 Box(
-                                    modifier = Modifier.size(smallKeySize).clickable {
-                                        if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
-                                        submitPin()
+                                    modifier = Modifier.size(smallKeySize).pointerInput(Unit) {
+                                        detectTapGestures(onTap = {
+                                            if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
+                                            submitPin()
+                                        })
                                     },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text("→|", color = Color.White, fontSize = smallTextSize, fontWeight = FontWeight.Light)
-                                    if (showEnterIndicator) {
+                                    if (showEnterDot) {
                                         Box(
                                             modifier = Modifier
                                                 .size(2.dp)
@@ -1130,7 +1194,7 @@ fun SettingsScreen(
     onSaveWrongAttemptsLimit: (Int) -> Unit,
     onSaveUnlockMethod: (String) -> Unit,
     onSaveHapticEnabled: (Boolean) -> Unit,
-    onSaveUnlockReadyShownBy: (String) -> Unit,
+    onSaveUnlockReadyIndicator: (String) -> Unit,
     onSaveOnLaunchScreen: (String) -> Unit,
     onBack: () -> Unit,
     onPerform: () -> Unit
@@ -1165,13 +1229,13 @@ fun SettingsScreen(
 
             Text("On launch", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(modifier = Modifier.height(12.dp))
-            SettingsOption("Home Screen", selected = currentSettings.onLaunchScreen == "home") {
+            LegacySettingsOption("Home Screen", selected = currentSettings.onLaunchScreen == "home") {
                 performHapticFeedback(ctx)
                 onSaveOnLaunchScreen("home")
                 onUpdateSettings(currentSettings.copy(onLaunchScreen = "home"))
             }
             Spacer(modifier = Modifier.height(10.dp))
-            SettingsOption("Direct to lock screen", selected = currentSettings.onLaunchScreen == "no_home") {
+            LegacySettingsOption("Direct to lock screen", selected = currentSettings.onLaunchScreen == "no_home") {
                 performHapticFeedback(ctx)
                 onSaveOnLaunchScreen("no_home")
                 onUpdateSettings(currentSettings.copy(onLaunchScreen = "no_home"))
@@ -1180,13 +1244,13 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(28.dp))
             Text("PIN length", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(modifier = Modifier.height(12.dp))
-            SettingsOption("4 digits", selected = currentSettings.pinLength == 4) {
+            LegacySettingsOption("4 digits", selected = currentSettings.pinLength == 4) {
                 performHapticFeedback(ctx)
                 onSavePinLength(4)
                 onUpdateSettings(currentSettings.copy(pinLength = 4))
             }
             Spacer(modifier = Modifier.height(10.dp))
-            SettingsOption("6 digits", selected = currentSettings.pinLength == 6) {
+            LegacySettingsOption("6 digits", selected = currentSettings.pinLength == 6) {
                 performHapticFeedback(ctx)
                 onSavePinLength(6)
                 onUpdateSettings(currentSettings.copy(pinLength = 6))
@@ -1195,13 +1259,13 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(28.dp))
             Text("Unlock method", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(modifier = Modifier.height(12.dp))
-            SettingsOption("Volume Up button", selected = currentSettings.unlockMethod == "volume_up") {
+            LegacySettingsOption("Volume Up button", selected = currentSettings.unlockMethod == "volume_up") {
                 performHapticFeedback(ctx)
                 onSaveUnlockMethod("volume_up")
                 onUpdateSettings(currentSettings.copy(unlockMethod = "volume_up"))
             }
             Spacer(modifier = Modifier.height(10.dp))
-            SettingsOption("Wrong attempts", selected = currentSettings.unlockMethod == "wrong_attempts") {
+            LegacySettingsOption("Wrong attempts", selected = currentSettings.unlockMethod == "wrong_attempts") {
                 performHapticFeedback(ctx)
                 onSaveUnlockMethod("wrong_attempts")
                 onUpdateSettings(currentSettings.copy(unlockMethod = "wrong_attempts"))
@@ -1268,27 +1332,27 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(28.dp))
             Text("Lock screen display", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(modifier = Modifier.height(12.dp))
-            SettingsOption("Date and time", selected = currentSettings.lockScreenTextMode == "date_time") {
+            LegacySettingsOption("Date and time", selected = currentSettings.lockScreenTextMode == "date_time") {
                 performHapticFeedback(ctx)
                 onSaveLockScreenTextMode("date_time")
-                val newShownBy = if (currentSettings.unlockReadyShownBy == "remove_comma") "remove_comma" else "entry_key"
-                onSaveUnlockReadyShownBy(newShownBy)
+                val newShownBy = if (currentSettings.unlockReadyIndicator == "remove_comma") "remove_comma" else "enter_key_dot"
+                onSaveUnlockReadyIndicator(newShownBy)
                 onUpdateSettings(
                     currentSettings.copy(
                         lockScreenTextMode = "date_time",
-                        unlockReadyShownBy = newShownBy
+                        unlockReadyIndicator = newShownBy
                     )
                 )
             }
             Spacer(modifier = Modifier.height(10.dp))
-            SettingsOption("'Enter PIN' message", selected = currentSettings.lockScreenTextMode == "message") {
+            LegacySettingsOption("'Enter PIN' message", selected = currentSettings.lockScreenTextMode == "message") {
                 performHapticFeedback(ctx)
                 onSaveLockScreenTextMode("message")
-                onSaveUnlockReadyShownBy("entry_key")
+                onSaveUnlockReadyIndicator("enter_key_dot")
                 onUpdateSettings(
                     currentSettings.copy(
                         lockScreenTextMode = "message",
-                        unlockReadyShownBy = "entry_key"
+                        unlockReadyIndicator = "enter_key_dot"
                     )
                 )
             }
@@ -1296,31 +1360,31 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(28.dp))
             Text("Unlock ready indicator", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(modifier = Modifier.height(12.dp))
-            SettingsOption(
+            LegacySettingsOption(
                 label = "Remove comma from date",
-                selected = currentSettings.unlockReadyShownBy == "remove_comma",
+                selected = currentSettings.unlockReadyIndicator == "remove_comma",
                 enabled = currentSettings.lockScreenTextMode == "date_time"
             ) {
                 if (currentSettings.lockScreenTextMode == "date_time") {
                     performHapticFeedback(ctx)
-                    onSaveUnlockReadyShownBy("remove_comma")
-                    onUpdateSettings(currentSettings.copy(unlockReadyShownBy = "remove_comma"))
+                    onSaveUnlockReadyIndicator("remove_comma")
+                    onUpdateSettings(currentSettings.copy(unlockReadyIndicator = "remove_comma"))
                 }
             }
             Spacer(modifier = Modifier.height(10.dp))
-            SettingsOption(
+            LegacySettingsOption(
                 label = "Dot on Enter key",
-                selected = currentSettings.unlockReadyShownBy == "entry_key"
+                selected = currentSettings.unlockReadyIndicator == "enter_key_dot"
             ) {
                 performHapticFeedback(ctx)
-                onSaveUnlockReadyShownBy("entry_key")
-                onUpdateSettings(currentSettings.copy(unlockReadyShownBy = "entry_key"))
+                onSaveUnlockReadyIndicator("enter_key_dot")
+                onUpdateSettings(currentSettings.copy(unlockReadyIndicator = "enter_key_dot"))
             }
 
             Spacer(modifier = Modifier.height(28.dp))
             Text("Haptic feedback", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(modifier = Modifier.height(12.dp))
-            SettingsOption(
+            LegacySettingsOption(
                 label = "Enabled",
                 selected = currentSettings.hapticFeedbackEnabled
             ) {
@@ -1329,7 +1393,7 @@ fun SettingsScreen(
                 onUpdateSettings(currentSettings.copy(hapticFeedbackEnabled = true))
             }
             Spacer(modifier = Modifier.height(10.dp))
-            SettingsOption(
+            LegacySettingsOption(
                 label = "Disabled",
                 selected = !currentSettings.hapticFeedbackEnabled
             ) {
@@ -1422,8 +1486,10 @@ fun SettingsScreen(
     }
 }
 
+
+
 @Composable
-fun SettingsOption(
+fun LegacySettingsOption(
     label: String,
     selected: Boolean,
     enabled: Boolean = true,
