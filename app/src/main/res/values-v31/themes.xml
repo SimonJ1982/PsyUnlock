@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- CHANGE: Android 12+ startup screen -->
+    <style name="Theme.Lockscreen" parent="android:style/Theme.Material.NoActionBar">
+
+        <!-- CHANGE: Make the Android 12+ splash background black -->
+        <item name="android:windowBackground">#000000</item>
+
+        <!-- CHANGE: Hide the splash icon by using a transparent color -->
+        <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+
+        <!-- CHANGE: Black splash background -->
+        <item name="android:windowSplashScreenBackground">#000000</item>
+
+        <!-- CHANGE: Fullscreen -->
+        <item name="android:windowFullscreen">true</item>
+
+    </style>
+
+</resources>

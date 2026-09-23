@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!-- CHANGE: Normal vector drawable used as the adaptive icon foreground -->
+<vector
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- CHANGE: Calculator body -->
+    <path
+        android:fillColor="#303030"
+        android:pathData="
+            M25,10
+            L83,10
+            C91,10 98,17 98,25
+            L98,83
+            C98,91 91,98 83,98
+            L25,98
+            C17,98 10,91 10,83
+            L10,25
+            C10,17 17,10 25,10
+            Z" />
+
+    <!-- CHANGE: Calculator display -->
+    <path
+        android:fillColor="#D8E0E5"
+        android:pathData="
+            M24,20
+            L84,20
+            C86.2,20 88,21.8 88,24
+            L88,38
+            C88,40.2 86.2,42 84,42
+            L24,42
+            C21.8,42 20,40.2 20,38
+            L20,24
+            C20,21.8 21.8,20 24,20
+            Z" />
+
+    <!-- CHANGE: Display detail -->
+    <path
+        android:fillColor="#59636A"
+        android:pathData="
+            M68,27
+            L82,27
+            L82,35
+            L68,35
+            Z" />
+
+    <!-- CHANGE: Calculator buttons -->
+    <path
+        android:fillColor="#777777"
+        android:pathData="
+            M22,49 L36,49 L36,62 L22,62 Z
+            M47,49 L61,49 L61,62 L47,62 Z
+            M72,49 L86,49 L86,62 L72,62 Z
+            M22,68 L36,68 L36,81 L22,81 Z
+            M47,68 L61,68 L61,81 L47,81 Z
+            M72,68 L86,68 L86,81 L72,81 Z" />
+
+    <!-- CHANGE: Bottom calculator buttons -->
+    <path
+        android:fillColor="#AAAAAA"
+        android:pathData="
+            M22,86
+            L61,86
+            L61,92
+            L22,92
+            Z
+
+            M72,86
+            L86,86
+            L86,92
+            L72,92
+            Z" />
+
+</vector>
