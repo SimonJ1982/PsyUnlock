@@ -687,7 +687,7 @@ fun PsyUnlockSettingsScreen(onBack: () -> Unit) {
                             )
                             .clickable {
                                 performHapticFeedback(ctx)
-                                waitTimeStepSeconds = sec
+                                waitTimeStepSeconds = if (waitTimeStepSeconds == sec) 1 else sec
                             },
                         contentAlignment = Alignment.Center
                     ) {
