@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -70,6 +71,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.delay
 import java.util.Date
 import java.util.Locale
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 // ---- Haptic feedback ----
@@ -248,6 +250,7 @@ fun LockScreenApp(
 ) {
     var currentScreen by remember { mutableStateOf(initialScreen) }
     var settings by remember(FakeLockScreenState.pinResetTrigger) { mutableStateOf(loadSettings()) }
+    var psyPinLength by remember { mutableIntStateOf(4) }
 
     LaunchedEffect(FakeLockScreenState.pinResetTrigger) {
         settings = loadSettings()
@@ -283,19 +286,20 @@ fun LockScreenApp(
             onUnlock = onUnlock,
             onOpenSettings = { currentScreen = "settings" }
         )
-        "psy_keypad_4" -> PsyKeypadScreen(
-            pinLength = 4,
-            onEnter = {
+        "psy_keypad_4", "psy_keypad_6" -> PsyKeypadScreen(
+            pinLength = if (currentScreen == "psy_keypad_4") 4 else 6,
+            onEnter = { length ->
+                psyPinLength = length
                 FakeLockScreenState.fullReset()
-                currentScreen = "lockscreen"
+                currentScreen = "psy_lockscreen"
             }
         )
-        "psy_keypad_6" -> PsyKeypadScreen(
-            pinLength = 6,
-            onEnter = {
-                FakeLockScreenState.fullReset()
-                currentScreen = "lockscreen"
-            }
+        "psy_lockscreen" -> LockScreenEntry(
+            settings = settings.copy(pinLength = psyPinLength),
+            resetSignal = FakeLockScreenState.pinResetTrigger,
+            onUnlock = onUnlock,
+            onOpenSettings = { currentScreen = "settings" },
+            psyMode = true
         )
         "psy_settings" -> PsyUnlockSettingsScreen(onBack = { currentScreen = "home" })
     }
@@ -396,7 +400,7 @@ fun HomeOptionButton(label: String, subLabel: String, onClick: () -> Unit) {
 }
 
 @Composable
-fun PsyKeypadScreen(pinLength: Int, onEnter: () -> Unit) {
+fun PsyKeypadScreen(pinLength: Int, onEnter: (Int) -> Unit) {
     val ctx = LocalContext.current
     val prefs = remember {
         ctx.getSharedPreferences("lockscreen_settings", Context.MODE_PRIVATE)
@@ -409,6 +413,14 @@ fun PsyKeypadScreen(pinLength: Int, onEnter: () -> Unit) {
     }
 
     var enteredPin by remember { mutableStateOf("") }
+    var submittedPin by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(submittedPin) {
+        if (submittedPin != null) {
+            delay(900.milliseconds)
+            onEnter(pinLength)
+        }
+    }
 
     fun appendDigit(digit: String) {
         if (enteredPin.length < pinLength) {
@@ -427,7 +439,7 @@ fun PsyKeypadScreen(pinLength: Int, onEnter: () -> Unit) {
             prefs.edit {
                 putString(savedPinKey, enteredPin)
             }
-            onEnter()
+            submittedPin = enteredPin
         }
     }
 
@@ -463,11 +475,9 @@ fun PsyKeypadScreen(pinLength: Int, onEnter: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(13.dp)) {
                 repeat(pinLength) { index ->
                     val filled = index < enteredPin.length
-                    Spacer(
-                        modifier = Modifier
-                            .size(pinDotDiameter)
-                            .then(if (filled) Modifier.background(Color.White, CircleShape) else Modifier)
-                    )
+                    Box(modifier = Modifier.size(pinDotDiameter), contentAlignment = Alignment.Center) {
+                        if (filled) Text(enteredPin[index].toString(), color = Color.White, fontSize = 22.sp)
+                    }
                 }
             }
 
@@ -559,6 +569,18 @@ fun PsyKeypadScreen(pinLength: Int, onEnter: () -> Unit) {
                         }
                     }
                 }
+            }
+        }
+        if (submittedPin != null) {
+            Box(
+                modifier = Modifier.fillMaxHeight(0.75f).align(Alignment.TopCenter),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Text(
+                    "$submittedPin submitted",
+                    color = Color.White,
+                    fontSize = 18.sp
+                )
             }
         }
     }
@@ -884,7 +906,8 @@ fun LockScreenEntry(
     settings: MainActivity.SettingsSnapshot,
     resetSignal: Int,
     onUnlock: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    psyMode: Boolean = false
 ) {
     val ctx = LocalContext.current
     val density = LocalDensity.current
@@ -993,6 +1016,7 @@ fun LockScreenEntry(
     }
 
     fun submitPin() {
+        if (psyMode) return // PsyUnlock keypad behaviour will be added separately.
         if (enteredPin.length != settings.pinLength) {
             statusMessage = "Wrong PIN. Try again."
             clearPin()
@@ -1707,4 +1731,5 @@ fun LegacySettingsOption(
         }
     }
 }
+
 
