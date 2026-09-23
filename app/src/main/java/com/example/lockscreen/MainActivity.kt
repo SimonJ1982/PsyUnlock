@@ -1,3 +1,4 @@
+
 package com.example.lockscreen
 
 import android.content.Context
@@ -51,6 +52,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -71,7 +75,7 @@ import kotlin.time.Duration.Companion.seconds
 
 // ---- Haptic feedback ----
 fun performHapticFeedback(context: Context) {
-    val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
+    val vibrator = context.getSystemService(Vibrator::class.java) ?: return
     vibrator.vibrate(VibrationEffect.createOneShot(30, VibrationEffect.DEFAULT_AMPLITUDE))
 }
 
@@ -255,8 +259,8 @@ fun LockScreenApp(
             onInstructions = { currentScreen = "instructions" },
             onSettings = { currentScreen = "settings" },
             onPerform = { FakeLockScreenState.fullReset(); currentScreen = "lockscreen" },
-            onPsyUnlock4PIN = { currentScreen = "psy_keypad" },
-            onPsyUnlock6PIN = { currentScreen = "psy_keypad" },
+            onPsyUnlock4PIN = { currentScreen = "psy_keypad_4" },
+            onPsyUnlock6PIN = { currentScreen = "psy_keypad_6" },
             onPsyUnlockSettings = { currentScreen = "psy_settings" }
         )
         "instructions" -> InstructionsScreen(onBack = { currentScreen = "home" })
@@ -280,7 +284,14 @@ fun LockScreenApp(
             onUnlock = onUnlock,
             onOpenSettings = { currentScreen = "settings" }
         )
-        "psy_keypad" -> PsyKeypadScreen(onBack = { currentScreen = "home" })
+        "psy_keypad_4" -> PsyKeypadScreen(
+            pinLength = 4,
+            onBack = { currentScreen = "home" }
+        )
+        "psy_keypad_6" -> PsyKeypadScreen(
+            pinLength = 6,
+            onBack = { currentScreen = "home" }
+        )
         "psy_settings" -> PsyUnlockSettingsScreen(onBack = { currentScreen = "home" })
     }
 }
@@ -380,8 +391,38 @@ fun HomeOptionButton(label: String, subLabel: String, onClick: () -> Unit) {
 }
 
 @Composable
-fun PsyKeypadScreen(onBack: () -> Unit) {
+fun PsyKeypadScreen(pinLength: Int, onBack: () -> Unit) {
     val ctx = LocalContext.current
+    val prefs = remember {
+        ctx.getSharedPreferences("lockscreen_settings", Context.MODE_PRIVATE)
+    }
+
+    val savedPinKey = if (pinLength == 4) {
+        "psyunlock_4pin"
+    } else {
+        "psyunlock_6pin"
+    }
+
+    var enteredPin by remember { mutableStateOf("") }
+
+    fun appendDigit(digit: String) {
+        if (enteredPin.length < pinLength) {
+            enteredPin += digit
+
+            if (enteredPin.length == pinLength) {
+                prefs.edit {
+                    putString(savedPinKey, enteredPin)
+                }
+            }
+        }
+    }
+
+    fun deleteLast() {
+        if (enteredPin.isNotEmpty()) {
+            enteredPin = enteredPin.dropLast(1)
+        }
+    }
+
     val bgGradient = Brush.verticalGradient(
         colors = listOf(Color(0xFF0F1C2E), Color(0xFF050C15), Color(0xFF02060C))
     )
@@ -399,28 +440,69 @@ fun PsyKeypadScreen(onBack: () -> Unit) {
         ) {
             Spacer(modifier = Modifier.height(48.dp))
             Text(
-                "PsyUnlock 4PIN",
+                "PsyUnlock ${pinLength}PIN",
                 fontFamily = DecorativeFont,
                 fontSize = 32.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                "Enter $pinLength digits",
+                color = Color.White,
+                fontSize = 20.sp
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+            Text(
+                enteredPin,
+                color = Color.White,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.height(36.dp)
+            )
+            Spacer(modifier = Modifier.height(10.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                NumberButton("1", btnSize, numColor, numTextSize) { performHapticFeedback(ctx) }
-                NumberButton("2", btnSize, numColor, numTextSize) { performHapticFeedback(ctx) }
-                NumberButton("3", btnSize, numColor, numTextSize) { performHapticFeedback(ctx) }
+                NumberButton("1", btnSize, numColor, numTextSize) {
+                    performHapticFeedback(ctx)
+                    appendDigit("1")
+                }
+                NumberButton("2", btnSize, numColor, numTextSize) {
+                    performHapticFeedback(ctx)
+                    appendDigit("2")
+                }
+                NumberButton("3", btnSize, numColor, numTextSize) {
+                    performHapticFeedback(ctx)
+                    appendDigit("3")
+                }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                NumberButton("4", btnSize, numColor, numTextSize) { performHapticFeedback(ctx) }
-                NumberButton("5", btnSize, numColor, numTextSize) { performHapticFeedback(ctx) }
-                NumberButton("6", btnSize, numColor, numTextSize) { performHapticFeedback(ctx) }
+                NumberButton("4", btnSize, numColor, numTextSize) {
+                    performHapticFeedback(ctx)
+                    appendDigit("4")
+                }
+                NumberButton("5", btnSize, numColor, numTextSize) {
+                    performHapticFeedback(ctx)
+                    appendDigit("5")
+                }
+                NumberButton("6", btnSize, numColor, numTextSize) {
+                    performHapticFeedback(ctx)
+                    appendDigit("6")
+                }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                NumberButton("7", btnSize, numColor, numTextSize) { performHapticFeedback(ctx) }
-                NumberButton("8", btnSize, numColor, numTextSize) { performHapticFeedback(ctx) }
-                NumberButton("9", btnSize, numColor, numTextSize) { performHapticFeedback(ctx) }
+                NumberButton("7", btnSize, numColor, numTextSize) {
+                    performHapticFeedback(ctx)
+                    appendDigit("7")
+                }
+                NumberButton("8", btnSize, numColor, numTextSize) {
+                    performHapticFeedback(ctx)
+                    appendDigit("8")
+                }
+                NumberButton("9", btnSize, numColor, numTextSize) {
+                    performHapticFeedback(ctx)
+                    appendDigit("9")
+                }
             }
             Row(
                 modifier = Modifier.width(btnSize * 3 + spacing * 2),
@@ -429,16 +511,29 @@ fun PsyKeypadScreen(onBack: () -> Unit) {
             ) {
                 Box(modifier = Modifier.size(btnSize), contentAlignment = Alignment.Center) {
                     Box(
-                        modifier = Modifier.size(smallBtnSize).clickable { performHapticFeedback(ctx) },
+                        modifier = Modifier.size(smallBtnSize).clickable {
+                            performHapticFeedback(ctx)
+                            deleteLast()
+                        },
                         contentAlignment = Alignment.Center
                     ) {
                         Text("⌫", color = Color.White, fontSize = smallTextSize, fontWeight = FontWeight.Light)
                     }
                 }
-                NumberButton("0", btnSize, numColor, numTextSize) { performHapticFeedback(ctx) }
+                NumberButton("0", btnSize, numColor, numTextSize) {
+                    performHapticFeedback(ctx)
+                    appendDigit("0")
+                }
                 Box(modifier = Modifier.size(btnSize), contentAlignment = Alignment.Center) {
                     Box(
-                        modifier = Modifier.size(smallBtnSize).clickable { performHapticFeedback(ctx) },
+                        modifier = Modifier.size(smallBtnSize).clickable {
+                            performHapticFeedback(ctx)
+                            if (enteredPin.length == pinLength) {
+                                prefs.edit {
+                                    putString(savedPinKey, enteredPin)
+                                }
+                            }
+                        },
                         contentAlignment = Alignment.Center
                     ) {
                         Text("→|", color = Color.White, fontSize = smallTextSize, fontWeight = FontWeight.Light)
@@ -848,7 +943,7 @@ fun LockScreenEntry(
     }
 
     DisposableEffect(Unit) {
-        val handler = android.os.Handler(Looper.getMainLooper())
+        val handler = Handler(Looper.getMainLooper())
         val ticker = object : Runnable {
             override fun run() {
                 currentTime = Date()
@@ -982,8 +1077,16 @@ fun LockScreenEntry(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(datePart, color = Color.White.copy(alpha = 0.9f), fontSize = 21.sp)
                     Text(
-                        if (showCommaRemoval) " " else ", ",
-                        color = Color.White.copy(alpha = 0.9f),
+                        buildAnnotatedString {
+                            withStyle(
+                                SpanStyle(
+                                    color = if (showCommaRemoval) Color.Transparent else Color.White.copy(alpha = 0.9f)
+                                )
+                            ) {
+                                append(",")
+                            }
+                            append(" ")
+                        },
                         fontSize = 21.sp
                     )
                     Text(dateRemainder, color = Color.White.copy(alpha = 0.9f), fontSize = 21.sp)
@@ -1013,8 +1116,16 @@ fun LockScreenEntry(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(datePart, color = Color.White.copy(alpha = 0.75f), fontSize = 17.sp)
                             Text(
-                                if (showCommaRemoval) " " else ", ",
-                                color = Color.White.copy(alpha = 0.75f),
+                                buildAnnotatedString {
+                                    withStyle(
+                                        SpanStyle(
+                                            color = if (showCommaRemoval) Color.Transparent else Color.White.copy(alpha = 0.75f)
+                                        )
+                                    ) {
+                                        append(",")
+                                    }
+                                    append(" ")
+                                },
                                 fontSize = 17.sp
                             )
                             Text(dateRemainder, color = Color.White.copy(alpha = 0.75f), fontSize = 17.sp)
