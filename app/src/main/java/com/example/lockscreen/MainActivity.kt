@@ -981,9 +981,11 @@ fun LockScreenEntry(
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(datePart, color = Color.White.copy(alpha = 0.9f), fontSize = 21.sp)
-                    if (!showCommaRemoval) {
-                        Text(", ", color = Color.White.copy(alpha = 0.9f), fontSize = 21.sp)
-                    }
+                    Text(
+                        if (showCommaRemoval) " " else ", ",
+                        color = Color.White.copy(alpha = 0.9f),
+                        fontSize = 21.sp
+                    )
                     Text(dateRemainder, color = Color.White.copy(alpha = 0.9f), fontSize = 21.sp)
                 }
                 Spacer(modifier = Modifier.height(10.dp))
@@ -1010,9 +1012,11 @@ fun LockScreenEntry(
                         Text(timeDisplay, color = Color.White, fontSize = 64.sp, fontWeight = FontWeight.Light)
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(datePart, color = Color.White.copy(alpha = 0.75f), fontSize = 17.sp)
-                            if (!showCommaRemoval) {
-                                Text(", ", color = Color.White.copy(alpha = 0.75f), fontSize = 17.sp)
-                            }
+                            Text(
+                                if (showCommaRemoval) " " else ", ",
+                                color = Color.White.copy(alpha = 0.75f),
+                                fontSize = 17.sp
+                            )
                             Text(dateRemainder, color = Color.White.copy(alpha = 0.75f), fontSize = 17.sp)
                         }
                     } else {
