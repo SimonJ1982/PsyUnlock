@@ -1,4 +1,3 @@
-
 package com.example.lockscreen
 
 import android.content.Context
@@ -286,11 +285,17 @@ fun LockScreenApp(
         )
         "psy_keypad_4" -> PsyKeypadScreen(
             pinLength = 4,
-            onBack = { currentScreen = "home" }
+            onEnter = {
+                FakeLockScreenState.fullReset()
+                currentScreen = "lockscreen"
+            }
         )
         "psy_keypad_6" -> PsyKeypadScreen(
             pinLength = 6,
-            onBack = { currentScreen = "home" }
+            onEnter = {
+                FakeLockScreenState.fullReset()
+                currentScreen = "lockscreen"
+            }
         )
         "psy_settings" -> PsyUnlockSettingsScreen(onBack = { currentScreen = "home" })
     }
@@ -391,7 +396,7 @@ fun HomeOptionButton(label: String, subLabel: String, onClick: () -> Unit) {
 }
 
 @Composable
-fun PsyKeypadScreen(pinLength: Int, onBack: () -> Unit) {
+fun PsyKeypadScreen(pinLength: Int, onEnter: () -> Unit) {
     val ctx = LocalContext.current
     val prefs = remember {
         ctx.getSharedPreferences("lockscreen_settings", Context.MODE_PRIVATE)
@@ -408,12 +413,6 @@ fun PsyKeypadScreen(pinLength: Int, onBack: () -> Unit) {
     fun appendDigit(digit: String) {
         if (enteredPin.length < pinLength) {
             enteredPin += digit
-
-            if (enteredPin.length == pinLength) {
-                prefs.edit {
-                    putString(savedPinKey, enteredPin)
-                }
-            }
         }
     }
 
@@ -423,134 +422,143 @@ fun PsyKeypadScreen(pinLength: Int, onBack: () -> Unit) {
         }
     }
 
+    fun savePinAndContinue() {
+        if (enteredPin.length == pinLength) {
+            prefs.edit {
+                putString(savedPinKey, enteredPin)
+            }
+            onEnter()
+        }
+    }
+
     val bgGradient = Brush.verticalGradient(
-        colors = listOf(Color(0xFF0F1C2E), Color(0xFF050C15), Color(0xFF02060C))
+        colors = listOf(Color(0xFF15263D), Color(0xFF07111F), Color(0xFF02060C))
     )
-    val btnSize = 75.dp
-    val smallBtnSize = btnSize / 2
-    val spacing = 22.dp
-    val numColor = Color(0xFF707070)
-    val numTextSize = 26.67.sp
-    val smallTextSize = numTextSize * 0.75f
+    val keySize = 75.dp
+    val smallKeySize = keySize / 2
+    val gap = 22.dp
+    val pinDotDiameter = 22.dp
+    val keyTextSize = 26.67.sp
+    val smallTextSize = keyTextSize * 0.75f
+    val keyColor = Color(0xFF707070)
+    val enterEnabled = enteredPin.length == pinLength
 
-    Box(modifier = Modifier.fillMaxSize().background(bgGradient), contentAlignment = Alignment.Center) {
+    Box(modifier = Modifier.fillMaxSize().background(bgGradient)) {
         Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(spacing)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp, 48.dp, 16.dp, 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(48.dp))
             Text(
-                "PsyUnlock ${pinLength}PIN",
-                fontFamily = DecorativeFont,
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                "Enter $pinLength digits",
+                text = "Enter $pinLength digits",
                 color = Color.White,
-                fontSize = 20.sp
-            )
-            Spacer(modifier = Modifier.height(20.dp))
-            Text(
-                enteredPin,
-                color = Color.White,
-                fontSize = 28.sp,
+                fontSize = 22.sp,
                 fontWeight = FontWeight.Medium,
-                modifier = Modifier.height(36.dp)
+                textAlign = TextAlign.Center
             )
-            Spacer(modifier = Modifier.height(10.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                NumberButton("1", btnSize, numColor, numTextSize) {
-                    performHapticFeedback(ctx)
-                    appendDigit("1")
-                }
-                NumberButton("2", btnSize, numColor, numTextSize) {
-                    performHapticFeedback(ctx)
-                    appendDigit("2")
-                }
-                NumberButton("3", btnSize, numColor, numTextSize) {
-                    performHapticFeedback(ctx)
-                    appendDigit("3")
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                NumberButton("4", btnSize, numColor, numTextSize) {
-                    performHapticFeedback(ctx)
-                    appendDigit("4")
-                }
-                NumberButton("5", btnSize, numColor, numTextSize) {
-                    performHapticFeedback(ctx)
-                    appendDigit("5")
-                }
-                NumberButton("6", btnSize, numColor, numTextSize) {
-                    performHapticFeedback(ctx)
-                    appendDigit("6")
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                NumberButton("7", btnSize, numColor, numTextSize) {
-                    performHapticFeedback(ctx)
-                    appendDigit("7")
-                }
-                NumberButton("8", btnSize, numColor, numTextSize) {
-                    performHapticFeedback(ctx)
-                    appendDigit("8")
-                }
-                NumberButton("9", btnSize, numColor, numTextSize) {
-                    performHapticFeedback(ctx)
-                    appendDigit("9")
-                }
-            }
-            Row(
-                modifier = Modifier.width(btnSize * 3 + spacing * 2),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(modifier = Modifier.size(btnSize), contentAlignment = Alignment.Center) {
-                    Box(
-                        modifier = Modifier.size(smallBtnSize).clickable {
-                            performHapticFeedback(ctx)
-                            deleteLast()
-                        },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("⌫", color = Color.White, fontSize = smallTextSize, fontWeight = FontWeight.Light)
-                    }
-                }
-                NumberButton("0", btnSize, numColor, numTextSize) {
-                    performHapticFeedback(ctx)
-                    appendDigit("0")
-                }
-                Box(modifier = Modifier.size(btnSize), contentAlignment = Alignment.Center) {
-                    Box(
-                        modifier = Modifier.size(smallBtnSize).clickable {
-                            performHapticFeedback(ctx)
-                            if (enteredPin.length == pinLength) {
-                                prefs.edit {
-                                    putString(savedPinKey, enteredPin)
-                                }
-                            }
-                        },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("→|", color = Color.White, fontSize = smallTextSize, fontWeight = FontWeight.Light)
-                    }
+            Spacer(modifier = Modifier.height(28.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(13.dp)) {
+                repeat(pinLength) { index ->
+                    val filled = index < enteredPin.length
+                    Spacer(
+                        modifier = Modifier
+                            .size(pinDotDiameter)
+                            .then(if (filled) Modifier.background(Color.White, CircleShape) else Modifier)
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.85f)
-                    .height(58.dp)
-                    .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp))
-                    .clickable { performHapticFeedback(ctx); onBack() },
-                contentAlignment = Alignment.Center
+            Spacer(modifier = Modifier.height(48.dp))
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(gap)
             ) {
-                Text("Back to Home Screen", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    NumberButton("1", keySize, keyColor, keyTextSize) {
+                        performHapticFeedback(ctx)
+                        appendDigit("1")
+                    }
+                    NumberButton("2", keySize, keyColor, keyTextSize) {
+                        performHapticFeedback(ctx)
+                        appendDigit("2")
+                    }
+                    NumberButton("3", keySize, keyColor, keyTextSize) {
+                        performHapticFeedback(ctx)
+                        appendDigit("3")
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    NumberButton("4", keySize, keyColor, keyTextSize) {
+                        performHapticFeedback(ctx)
+                        appendDigit("4")
+                    }
+                    NumberButton("5", keySize, keyColor, keyTextSize) {
+                        performHapticFeedback(ctx)
+                        appendDigit("5")
+                    }
+                    NumberButton("6", keySize, keyColor, keyTextSize) {
+                        performHapticFeedback(ctx)
+                        appendDigit("6")
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    NumberButton("7", keySize, keyColor, keyTextSize) {
+                        performHapticFeedback(ctx)
+                        appendDigit("7")
+                    }
+                    NumberButton("8", keySize, keyColor, keyTextSize) {
+                        performHapticFeedback(ctx)
+                        appendDigit("8")
+                    }
+                    NumberButton("9", keySize, keyColor, keyTextSize) {
+                        performHapticFeedback(ctx)
+                        appendDigit("9")
+                    }
+                }
+                Row(
+                    modifier = Modifier.width(keySize * 3 + gap * 2),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(modifier = Modifier.size(keySize), contentAlignment = Alignment.Center) {
+                        Box(
+                            modifier = Modifier
+                                .size(smallKeySize)
+                                .clickable {
+                                    performHapticFeedback(ctx)
+                                    deleteLast()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("⌫", color = Color.White, fontSize = smallTextSize, fontWeight = FontWeight.Light)
+                        }
+                    }
+                    NumberButton("0", keySize, keyColor, keyTextSize) {
+                        performHapticFeedback(ctx)
+                        appendDigit("0")
+                    }
+                    Box(modifier = Modifier.size(keySize), contentAlignment = Alignment.Center) {
+                        Box(
+                            modifier = Modifier
+                                .size(smallKeySize)
+                                .background(
+                                    if (enterEnabled) keyColor else keyColor.copy(alpha = 0.35f),
+                                    CircleShape
+                                )
+                                .clickable(enabled = enterEnabled) {
+                                    performHapticFeedback(ctx)
+                                    savePinAndContinue()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("→|", color = Color.White, fontSize = smallTextSize, fontWeight = FontWeight.Light)
+                        }
+                    }
+                }
             }
         }
     }
@@ -670,7 +678,6 @@ fun PsyUnlockSettingsScreen(onBack: () -> Unit) {
                 }
             }
 
-            // ===== ONLY NEW CODE ADDED HERE =====
             Spacer(modifier = Modifier.height(16.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(0.85f),
@@ -687,7 +694,7 @@ fun PsyUnlockSettingsScreen(onBack: () -> Unit) {
                             )
                             .clickable {
                                 performHapticFeedback(ctx)
-                                waitTimeStepSeconds = if (waitTimeStepSeconds == sec) 1 else sec
+                                waitTimeStepSeconds = sec
                             },
                         contentAlignment = Alignment.Center
                     ) {
@@ -700,7 +707,6 @@ fun PsyUnlockSettingsScreen(onBack: () -> Unit) {
                     }
                 }
             }
-            // ===== END OF NEW CODE =====
 
             Spacer(modifier = Modifier.height(28.dp))
             Box(
@@ -918,14 +924,20 @@ fun LockScreenEntry(
     val keypadVerticalOffset = (-57).dp
 
     val volumeUpArmed = FakeLockScreenState.volumeUpPressed
-    val isUnlockReady = when (settings.unlockMethod) {
-        "volume_up" -> volumeUpArmed
-        "wrong_attempts" -> wrongAttemptCount.intValue >= settings.wrongAttemptsLimit
-        else -> false
-    }
+
+
     val showCommaRemoval = settings.unlockReadyIndicator == "remove_comma" &&
-            settings.lockScreenTextMode == "date_time" && isUnlockReady
-    val showEnterDot = isUnlockReady && !showCommaRemoval
+            when (settings.unlockMethod) {
+                "volume_up" -> volumeUpArmed
+                "wrong_attempts" -> wrongAttemptCount.intValue >= settings.wrongAttemptsLimit
+                else -> false
+            }
+    val showEnterDot = settings.unlockReadyIndicator == "enter_key_dot" &&
+            when (settings.unlockMethod) {
+                "volume_up" -> volumeUpArmed
+                "wrong_attempts" -> wrongAttemptCount.intValue >= settings.wrongAttemptsLimit
+                else -> false
+            }
 
     LaunchedEffect(screenRevealed) {
         faceNotRecognized = false
@@ -965,24 +977,28 @@ fun LockScreenEntry(
     val dateRemainder = if (commaIndex >= 0) dateFull.drop(commaIndex + 2) else ""
 
     fun clearPin() { enteredPin = "" }
+
     fun appendDigit(digit: String) {
         if (enteredPin.length < settings.pinLength) {
             enteredPin += digit
             statusMessage = ""
         }
     }
+
     fun deleteLast() {
         if (enteredPin.isNotEmpty()) {
             enteredPin = enteredPin.dropLast(1)
             statusMessage = ""
         }
     }
+
     fun submitPin() {
         if (enteredPin.length != settings.pinLength) {
-            statusMessage = "Please enter ${settings.pinLength} digits"
+            statusMessage = "Wrong PIN. Try again."
             clearPin()
             return
         }
+
         when (settings.unlockMethod) {
             "volume_up" -> {
                 if (volumeUpArmed) {
@@ -994,6 +1010,7 @@ fun LockScreenEntry(
                     statusMessage = "Wrong PIN. Try again."
                 }
             }
+
             "wrong_attempts" -> {
                 if (wrongAttemptCount.intValue >= settings.wrongAttemptsLimit) {
                     clearPin()
@@ -1002,9 +1019,10 @@ fun LockScreenEntry(
                 } else {
                     wrongAttemptCount.intValue += 1
                     clearPin()
-                    statusMessage = "Wrong PIN — try again"
+                    statusMessage = "Wrong PIN. try again"
                 }
             }
+
             else -> {
                 clearPin()
                 statusMessage = "Unlocking…"
@@ -1015,7 +1033,9 @@ fun LockScreenEntry(
     val defaultBg = Brush.verticalGradient(
         colors = listOf(Color(0xFF15263D), Color(0xFF07111F), Color(0xFF02060C))
     )
+
     var backgroundBitmap by remember(settings.backgroundUri) { mutableStateOf<ImageBitmap?>(null) }
+
     LaunchedEffect(settings.backgroundUri) {
         backgroundBitmap = null
         settings.backgroundUri?.let { uriStr ->
@@ -1139,6 +1159,7 @@ fun LockScreenEntry(
                             textAlign = TextAlign.Center
                         )
                     }
+
                     AnimatedVisibility(faceNotRecognized) {
                         Column {
                             Spacer(modifier = Modifier.height(8.dp))
@@ -1150,6 +1171,7 @@ fun LockScreenEntry(
                             )
                         }
                     }
+
                     Spacer(modifier = Modifier.height(28.dp))
                     Spacer(modifier = Modifier.height(76.dp))
 
@@ -1167,6 +1189,7 @@ fun LockScreenEntry(
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
+
                     AnimatedVisibility(statusMessage.isNotEmpty()) {
                         Text(
                             statusMessage,
@@ -1201,6 +1224,7 @@ fun LockScreenEntry(
                                 appendDigit("3")
                             }
                         }
+
                         Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
                             NumberButton("4", keySize, keyColor, keyTextSize) {
                                 if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
@@ -1215,6 +1239,7 @@ fun LockScreenEntry(
                                 appendDigit("6")
                             }
                         }
+
                         Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
                             NumberButton("7", keySize, keyColor, keyTextSize) {
                                 if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
@@ -1229,6 +1254,7 @@ fun LockScreenEntry(
                                 appendDigit("9")
                             }
                         }
+
                         Row(
                             modifier = Modifier.width(keySize * 3 + gap * 2),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1247,13 +1273,15 @@ fun LockScreenEntry(
                                     Text("⌫", color = Color.White, fontSize = smallTextSize, fontWeight = FontWeight.Light)
                                 }
                             }
+
                             NumberButton("0", keySize, keyColor, keyTextSize) {
                                 if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
                                 appendDigit("0")
                             }
+
                             Box(modifier = Modifier.size(keySize), contentAlignment = Alignment.Center) {
                                 Box(
-                                    modifier = Modifier.size(smallKeySize).pointerInput(Unit) {
+                                    modifier = Modifier.size(smallKeySize).pointerInput(volumeUpArmed, settings.pinLength, settings.unlockMethod) {
                                         detectTapGestures(onTap = {
                                             if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
                                             submitPin()
@@ -1262,6 +1290,7 @@ fun LockScreenEntry(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text("→|", color = Color.White, fontSize = smallTextSize, fontWeight = FontWeight.Light)
+
                                     if (showEnterDot) {
                                         Box(
                                             modifier = Modifier
@@ -1273,6 +1302,7 @@ fun LockScreenEntry(
                                 }
                             }
                         }
+
                         Box(
                             modifier = Modifier
                                 .width(194.dp)
@@ -1293,6 +1323,7 @@ fun LockScreenEntry(
                         }
                     }
                 }
+
                 Spacer(modifier = Modifier.height(8.dp))
             }
         }
@@ -1315,6 +1346,7 @@ fun SettingsScreen(
     onPerform: () -> Unit
 ) {
     val ctx = LocalContext.current
+
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let {
             val uriStr = it.toString()
@@ -1324,6 +1356,7 @@ fun SettingsScreen(
     }
 
     var previewBitmap by remember(currentSettings.backgroundUri) { mutableStateOf<ImageBitmap?>(null) }
+
     LaunchedEffect(currentSettings.backgroundUri) {
         previewBitmap = null
         currentSettings.backgroundUri?.let { uriStr ->
@@ -1344,12 +1377,15 @@ fun SettingsScreen(
 
             Text("On launch", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(modifier = Modifier.height(12.dp))
+
             LegacySettingsOption("Home Screen", selected = currentSettings.onLaunchScreen == "home") {
                 performHapticFeedback(ctx)
                 onSaveOnLaunchScreen("home")
                 onUpdateSettings(currentSettings.copy(onLaunchScreen = "home"))
             }
+
             Spacer(modifier = Modifier.height(10.dp))
+
             LegacySettingsOption("Direct to lock screen", selected = currentSettings.onLaunchScreen == "no_home") {
                 performHapticFeedback(ctx)
                 onSaveOnLaunchScreen("no_home")
@@ -1359,12 +1395,15 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(28.dp))
             Text("PIN length", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(modifier = Modifier.height(12.dp))
+
             LegacySettingsOption("4 digits", selected = currentSettings.pinLength == 4) {
                 performHapticFeedback(ctx)
                 onSavePinLength(4)
                 onUpdateSettings(currentSettings.copy(pinLength = 4))
             }
+
             Spacer(modifier = Modifier.height(10.dp))
+
             LegacySettingsOption("6 digits", selected = currentSettings.pinLength == 6) {
                 performHapticFeedback(ctx)
                 onSavePinLength(6)
@@ -1374,12 +1413,15 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(28.dp))
             Text("Unlock method", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(modifier = Modifier.height(12.dp))
+
             LegacySettingsOption("Volume Up button", selected = currentSettings.unlockMethod == "volume_up") {
                 performHapticFeedback(ctx)
                 onSaveUnlockMethod("volume_up")
                 onUpdateSettings(currentSettings.copy(unlockMethod = "volume_up"))
             }
+
             Spacer(modifier = Modifier.height(10.dp))
+
             LegacySettingsOption("Wrong attempts", selected = currentSettings.unlockMethod == "wrong_attempts") {
                 performHapticFeedback(ctx)
                 onSaveUnlockMethod("wrong_attempts")
@@ -1398,6 +1440,7 @@ fun SettingsScreen(
                         textAlign = TextAlign.Center
                     )
                     Spacer(modifier = Modifier.height(12.dp))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -1415,6 +1458,7 @@ fun SettingsScreen(
                         ) {
                             Text("−", color = Color.White, fontSize = 28.sp)
                         }
+
                         Box(
                             modifier = Modifier.weight(1f).height(58.dp)
                                 .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp)),
@@ -1427,6 +1471,7 @@ fun SettingsScreen(
                                 fontWeight = FontWeight.Medium
                             )
                         }
+
                         Box(
                             modifier = Modifier.size(58.dp)
                                 .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
@@ -1447,6 +1492,7 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(28.dp))
             Text("Lock screen display", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(modifier = Modifier.height(12.dp))
+
             LegacySettingsOption("Date and time", selected = currentSettings.lockScreenTextMode == "date_time") {
                 performHapticFeedback(ctx)
                 onSaveLockScreenTextMode("date_time")
@@ -1459,7 +1505,9 @@ fun SettingsScreen(
                     )
                 )
             }
+
             Spacer(modifier = Modifier.height(10.dp))
+
             LegacySettingsOption("'Enter PIN' message", selected = currentSettings.lockScreenTextMode == "message") {
                 performHapticFeedback(ctx)
                 onSaveLockScreenTextMode("message")
@@ -1475,6 +1523,7 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(28.dp))
             Text("Unlock ready indicator", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(modifier = Modifier.height(12.dp))
+
             LegacySettingsOption(
                 label = "Remove comma from date",
                 selected = currentSettings.unlockReadyIndicator == "remove_comma",
@@ -1486,7 +1535,9 @@ fun SettingsScreen(
                     onUpdateSettings(currentSettings.copy(unlockReadyIndicator = "remove_comma"))
                 }
             }
+
             Spacer(modifier = Modifier.height(10.dp))
+
             LegacySettingsOption(
                 label = "Dot on Enter key",
                 selected = currentSettings.unlockReadyIndicator == "enter_key_dot"
@@ -1499,6 +1550,7 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(28.dp))
             Text("Haptic feedback", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(modifier = Modifier.height(12.dp))
+
             LegacySettingsOption(
                 label = "Enabled",
                 selected = currentSettings.hapticFeedbackEnabled
@@ -1507,7 +1559,9 @@ fun SettingsScreen(
                 onSaveHapticEnabled(true)
                 onUpdateSettings(currentSettings.copy(hapticFeedbackEnabled = true))
             }
+
             Spacer(modifier = Modifier.height(10.dp))
+
             LegacySettingsOption(
                 label = "Disabled",
                 selected = !currentSettings.hapticFeedbackEnabled
@@ -1547,6 +1601,7 @@ fun SettingsScreen(
             }
 
             Spacer(modifier = Modifier.height(10.dp))
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1563,6 +1618,7 @@ fun SettingsScreen(
             }
 
             Spacer(modifier = Modifier.height(36.dp))
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1582,7 +1638,9 @@ fun SettingsScreen(
                     letterSpacing = 2.sp
                 )
             }
+
             Spacer(modifier = Modifier.height(12.dp))
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1596,12 +1654,11 @@ fun SettingsScreen(
             ) {
                 Text("Back to Home Screen", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
             }
+
             Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }
-
-
 
 @Composable
 fun LegacySettingsOption(
@@ -1615,6 +1672,7 @@ fun LegacySettingsOption(
         selected -> Color(0xFF2A3A4F)
         else -> Color(0xFF1E2D42)
     }
+
     val textAlpha = if (enabled) 1f else 0.4f
 
     Box(
@@ -1637,6 +1695,7 @@ fun LegacySettingsOption(
                 color = Color.White.copy(alpha = textAlpha),
                 fontSize = 16.sp
             )
+
             if (selected) {
                 Text(
                     text = "✓",
@@ -1648,3 +1707,4 @@ fun LegacySettingsOption(
         }
     }
 }
+
