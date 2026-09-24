@@ -317,7 +317,11 @@ fun LockScreenApp(
             onOpenSettings = { currentScreen = "psy_settings" },
             psyMode = true
         )
-        "psy_settings" -> PsyUnlockSettingsScreen(onBack = { currentScreen = "home" })
+        "psy_settings" -> PsyUnlockSettingsScreen(
+            onBack = { currentScreen = "home" },
+            onPsyUnlock4PIN = { currentScreen = "psy_keypad_4" },
+            onPsyUnlock6PIN = { currentScreen = "psy_keypad_6" }
+        )
     }
 }
 
@@ -603,7 +607,11 @@ fun PsyKeypadScreen(pinLength: Int, onEnter: (Int) -> Unit) {
 }
 
 @Composable
-fun PsyUnlockSettingsScreen(onBack: () -> Unit) {
+fun PsyUnlockSettingsScreen(
+    onBack: () -> Unit,
+    onPsyUnlock4PIN: () -> Unit,
+    onPsyUnlock6PIN: () -> Unit
+) {
     val ctx = LocalContext.current
     val prefs = remember(ctx) { ctx.getSharedPreferences("lockscreen_settings", Context.MODE_PRIVATE) }
     var attemptLimit by remember { mutableIntStateOf(prefs.getInt("psyunlock_wrong_attempts_limit", 3).coerceIn(1, 20)) }
@@ -758,6 +766,28 @@ fun PsyUnlockSettingsScreen(onBack: () -> Unit) {
             }
 
             Spacer(modifier = Modifier.height(28.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp)
+                    .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp))
+                    .clickable { performHapticFeedback(ctx); onPsyUnlock4PIN() },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Perform PsyUnlock 4PIN", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp)
+                    .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp))
+                    .clickable { performHapticFeedback(ctx); onPsyUnlock6PIN() },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Perform PsyUnlock 6PIN", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+            }
+            Spacer(modifier = Modifier.height(10.dp))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
