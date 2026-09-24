@@ -308,7 +308,9 @@ fun LockScreenApp(
                 psyPinLength = length
                 FakeLockScreenState.fullReset()
                 currentScreen = "psy_lockscreen"
-            }
+            },
+            onBackToHome = { currentScreen = "home" },
+            onOpenPsySettings = { currentScreen = "psy_settings" }
         )
         "psy_lockscreen" -> LockScreenEntry(
             settings = settings.copy(pinLength = psyPinLength),
@@ -420,7 +422,12 @@ fun HomeOptionButton(label: String, subLabel: String, onClick: () -> Unit) {
 }
 
 @Composable
-fun PsyKeypadScreen(pinLength: Int, onEnter: (Int) -> Unit) {
+fun PsyKeypadScreen(
+    pinLength: Int,
+    onEnter: (Int) -> Unit,
+    onBackToHome: () -> Unit,
+    onOpenPsySettings: () -> Unit
+) {
     val ctx = LocalContext.current
     val prefs = remember {
         ctx.getSharedPreferences("lockscreen_settings", Context.MODE_PRIVATE)
@@ -603,6 +610,36 @@ fun PsyKeypadScreen(pinLength: Int, onEnter: (Int) -> Unit) {
                 )
             }
         }
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp)
+                    .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp))
+                    .clickable { performHapticFeedback(ctx); onBackToHome() },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Back to Home Screen", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp)
+                    .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp))
+                    .clickable { performHapticFeedback(ctx); onOpenPsySettings() },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("PsyUnlock Setting", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+            }
+        }
     }
 }
 
@@ -617,6 +654,8 @@ fun PsyUnlockSettingsScreen(
     var attemptLimit by remember { mutableIntStateOf(prefs.getInt("psyunlock_wrong_attempts_limit", 3).coerceIn(1, 20)) }
     var waitTimeSeconds by remember { mutableIntStateOf(prefs.getInt("psyunlock_wait_time_seconds", 0).coerceAtLeast(0)) }
     var waitTimeStepSeconds by remember { mutableIntStateOf(1) }
+    var pauseTimeSeconds by remember { mutableIntStateOf(prefs.getInt("psyunlock_pause_time_seconds", 0).coerceAtLeast(0)) }
+    var pauseTimeStepSeconds by remember { mutableIntStateOf(1) }
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF02060C))) {
         Column(
@@ -690,6 +729,13 @@ fun PsyUnlockSettingsScreen(
             Spacer(modifier = Modifier.height(28.dp))
             Text("Wait time", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                "The length of time from the last wrong PIN entry to the start of unlock animation.",
+                color = Color.White.copy(alpha = 0.65f),
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(12.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(0.85f),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -752,6 +798,91 @@ fun PsyUnlockSettingsScreen(
                             .clickable {
                                 performHapticFeedback(ctx)
                                 waitTimeStepSeconds = if (waitTimeStepSeconds == sec) 1 else sec
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "$sec s",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+            Text("Pause time", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                "The pause between button presses in the unlock animation",
+                color = Color.White.copy(alpha = 0.65f),
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(0.85f),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier.size(58.dp)
+                        .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                        .clickable {
+                            performHapticFeedback(ctx)
+                            if (pauseTimeSeconds > 0) {
+                                pauseTimeSeconds = (pauseTimeSeconds - pauseTimeStepSeconds).coerceAtLeast(0)
+                                prefs.edit { putInt("psyunlock_pause_time_seconds", pauseTimeSeconds) }
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("−", color = Color.White, fontSize = 28.sp)
+                }
+                Box(
+                    modifier = Modifier.size(96.dp, 58.dp)
+                        .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "$pauseTimeSeconds s",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                Box(
+                    modifier = Modifier.size(58.dp)
+                        .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                        .clickable {
+                            performHapticFeedback(ctx)
+                            pauseTimeSeconds += pauseTimeStepSeconds
+                            prefs.edit { putInt("psyunlock_pause_time_seconds", pauseTimeSeconds) }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("+", color = Color.White, fontSize = 28.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(0.85f),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                listOf(5, 10, 30).forEach { sec ->
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(58.dp)
+                            .background(
+                                if (pauseTimeStepSeconds == sec) Color(0xFF64B5F6) else Color(0xFF1E2D42),
+                                RoundedCornerShape(18.dp)
+                            )
+                            .clickable {
+                                performHapticFeedback(ctx)
+                                pauseTimeStepSeconds = if (pauseTimeStepSeconds == sec) 1 else sec
                             },
                         contentAlignment = Alignment.Center
                     ) {
@@ -1143,6 +1274,7 @@ fun LockScreenEntry(
                 try {
                     val psyPrefs = ctx.getSharedPreferences("lockscreen_settings", Context.MODE_PRIVATE)
                     delay(psyPrefs.getInt("psyunlock_wait_time_seconds", 0).coerceAtLeast(0).seconds)
+                    val pauseTimeSeconds = psyPrefs.getInt("psyunlock_pause_time_seconds", 0).coerceAtLeast(0)
                     val savedPinKey = if (settings.pinLength == 4) "psyunlock_4pin" else "psyunlock_6pin"
                     val savedPin = psyPrefs.getString(savedPinKey, null)
                     if (savedPin != null && savedPin.length == settings.pinLength && savedPin.all { it.isDigit() }) {
@@ -1154,7 +1286,7 @@ fun LockScreenEntry(
                             enteredPin += digit
                             delay(180.milliseconds)
                             psyPressedKey = null
-                            delay(120.milliseconds)
+                            delay(pauseTimeSeconds.seconds)
                         }
                         psyPressedKey = "enter"
                         delay(240.milliseconds)
