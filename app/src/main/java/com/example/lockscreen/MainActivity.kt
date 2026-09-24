@@ -589,8 +589,9 @@ fun PsyKeypadScreen(pinLength: Int, onEnter: (Int) -> Unit) {
 @Composable
 fun PsyUnlockSettingsScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
-    var attemptLimit by remember { mutableIntStateOf(3) }
-    var waitTimeSeconds by remember { mutableIntStateOf(0) }
+    val prefs = remember(ctx) { ctx.getSharedPreferences("lockscreen_settings", Context.MODE_PRIVATE) }
+    var attemptLimit by remember { mutableIntStateOf(prefs.getInt("psyunlock_wrong_attempts_limit", 3).coerceIn(1, 20)) }
+    var waitTimeSeconds by remember { mutableIntStateOf(prefs.getInt("psyunlock_wait_time_seconds", 0).coerceAtLeast(0)) }
     var waitTimeStepSeconds by remember { mutableIntStateOf(1) }
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF02060C))) {
@@ -625,7 +626,10 @@ fun PsyUnlockSettingsScreen(onBack: () -> Unit) {
                         .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
                         .clickable {
                             performHapticFeedback(ctx)
-                            if (attemptLimit > 1) attemptLimit -= 1
+                            if (attemptLimit > 1) {
+                                attemptLimit -= 1
+                                prefs.edit { putInt("psyunlock_wrong_attempts_limit", attemptLimit) }
+                            }
                         },
                     contentAlignment = Alignment.Center
                 ) {
@@ -648,7 +652,10 @@ fun PsyUnlockSettingsScreen(onBack: () -> Unit) {
                         .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
                         .clickable {
                             performHapticFeedback(ctx)
-                            if (attemptLimit < 20) attemptLimit += 1
+                            if (attemptLimit < 20) {
+                                attemptLimit += 1
+                                prefs.edit { putInt("psyunlock_wrong_attempts_limit", attemptLimit) }
+                            }
                         },
                     contentAlignment = Alignment.Center
                 ) {
@@ -669,7 +676,10 @@ fun PsyUnlockSettingsScreen(onBack: () -> Unit) {
                         .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
                         .clickable {
                             performHapticFeedback(ctx)
-                            if (waitTimeSeconds > 0) waitTimeSeconds = (waitTimeSeconds - waitTimeStepSeconds).coerceAtLeast(0)
+                            if (waitTimeSeconds > 0) {
+                                waitTimeSeconds = (waitTimeSeconds - waitTimeStepSeconds).coerceAtLeast(0)
+                                prefs.edit { putInt("psyunlock_wait_time_seconds", waitTimeSeconds) }
+                            }
                         },
                     contentAlignment = Alignment.Center
                 ) {
@@ -693,6 +703,7 @@ fun PsyUnlockSettingsScreen(onBack: () -> Unit) {
                         .clickable {
                             performHapticFeedback(ctx)
                             waitTimeSeconds += waitTimeStepSeconds
+                            prefs.edit { putInt("psyunlock_wait_time_seconds", waitTimeSeconds) }
                         },
                     contentAlignment = Alignment.Center
                 ) {
@@ -920,6 +931,9 @@ fun LockScreenEntry(
     var statusMessage by remember { mutableStateOf("") }
     val wrongAttemptCount = remember { mutableIntStateOf(0) }
     var currentTime by remember { mutableStateOf(Date()) }
+    var psyAutoSequenceRunning by remember { mutableStateOf(false) }
+    var psyAutoSubmitReady by remember { mutableStateOf(false) }
+    var psyPressedKey by remember { mutableStateOf<String?>(null) }
 
     val revealThreshold = with(density) { 120.dp.toPx() }
     val maxTravelDistance = with(density) { 340.dp.toPx() }
@@ -945,9 +959,14 @@ fun LockScreenEntry(
     val keyBackgroundAlpha = if (settings.backgroundUri != null && (screenRevealed || progressFraction > 0.3f)) 1f else 0.6f
     val keyColor = Color(0xFF707070).copy(alpha = keyBackgroundAlpha)
     val keypadVerticalOffset = (-57).dp
+    fun psyKeyColor(digit: String) = if (psyMode && psyPressedKey == digit) Color(0xFF64B5F6) else keyColor
 
     val volumeUpArmed = FakeLockScreenState.volumeUpPressed
-
+    val psyWrongAttemptsLimit = remember(psyMode, ctx) {
+        if (psyMode) ctx.getSharedPreferences("lockscreen_settings", Context.MODE_PRIVATE)
+            .getInt("psyunlock_wrong_attempts_limit", 3).coerceIn(1, 20)
+        else 3
+    }
 
     val showCommaRemoval = settings.unlockReadyIndicator == "remove_comma" &&
             when (settings.unlockMethod) {
@@ -955,7 +974,9 @@ fun LockScreenEntry(
                 "wrong_attempts" -> wrongAttemptCount.intValue >= settings.wrongAttemptsLimit
                 else -> false
             }
-    val showEnterDot = settings.unlockReadyIndicator == "enter_key_dot" &&
+    val showEnterDot = if (psyMode) {
+        wrongAttemptCount.intValue >= psyWrongAttemptsLimit
+    } else settings.unlockReadyIndicator == "enter_key_dot" &&
             when (settings.unlockMethod) {
                 "volume_up" -> volumeUpArmed
                 "wrong_attempts" -> wrongAttemptCount.intValue >= settings.wrongAttemptsLimit
@@ -1002,6 +1023,7 @@ fun LockScreenEntry(
     fun clearPin() { enteredPin = "" }
 
     fun appendDigit(digit: String) {
+        if (psyMode && psyAutoSequenceRunning) return
         if (enteredPin.length < settings.pinLength) {
             enteredPin += digit
             statusMessage = ""
@@ -1009,6 +1031,7 @@ fun LockScreenEntry(
     }
 
     fun deleteLast() {
+        if (psyMode && psyAutoSequenceRunning) return
         if (enteredPin.isNotEmpty()) {
             enteredPin = enteredPin.dropLast(1)
             statusMessage = ""
@@ -1016,7 +1039,20 @@ fun LockScreenEntry(
     }
 
     fun submitPin() {
-        if (psyMode) return // PsyUnlock keypad behaviour will be added separately.
+        if (psyMode) {
+            if (psyAutoSubmitReady && enteredPin.length == settings.pinLength) {
+                psyAutoSubmitReady = false
+                onUnlock()
+                return
+            }
+            if (psyAutoSequenceRunning) return
+            if (enteredPin.length == settings.pinLength) {
+                wrongAttemptCount.intValue += 1
+                clearPin()
+                statusMessage = "Wrong PIN. Try again."
+            }
+            return
+        }
         if (enteredPin.length != settings.pinLength) {
             statusMessage = "Wrong PIN. Try again."
             clearPin()
@@ -1050,6 +1086,39 @@ fun LockScreenEntry(
             else -> {
                 clearPin()
                 statusMessage = "Unlocking…"
+            }
+        }
+    }
+
+    if (psyMode) {
+        LaunchedEffect(showEnterDot, resetSignal) {
+            if (showEnterDot) {
+                psyAutoSequenceRunning = true
+                try {
+                    val psyPrefs = ctx.getSharedPreferences("lockscreen_settings", Context.MODE_PRIVATE)
+                    delay(psyPrefs.getInt("psyunlock_wait_time_seconds", 0).coerceAtLeast(0).seconds)
+                    val savedPinKey = if (settings.pinLength == 4) "psyunlock_4pin" else "psyunlock_6pin"
+                    val savedPin = psyPrefs.getString(savedPinKey, null)
+                    if (savedPin != null && savedPin.length == settings.pinLength && savedPin.all { it.isDigit() }) {
+                        enteredPin = ""
+                        statusMessage = ""
+                        for (digit in savedPin) {
+                            psyPressedKey = digit.toString()
+                            delay(180.milliseconds)
+                            enteredPin += digit
+                            delay(180.milliseconds)
+                            psyPressedKey = null
+                            delay(120.milliseconds)
+                        }
+                        psyPressedKey = "enter"
+                        delay(240.milliseconds)
+                        psyAutoSubmitReady = true
+                        submitPin()
+                    }
+                } finally {
+                    psyPressedKey = null
+                    psyAutoSequenceRunning = false
+                }
             }
         }
     }
@@ -1235,45 +1304,45 @@ fun LockScreenEntry(
                         verticalArrangement = Arrangement.spacedBy(gap)
                     ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                            NumberButton("1", keySize, keyColor, keyTextSize) {
+                            NumberButton("1", keySize, psyKeyColor("1"), keyTextSize) {
                                 if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
                                 appendDigit("1")
                             }
-                            NumberButton("2", keySize, keyColor, keyTextSize) {
+                            NumberButton("2", keySize, psyKeyColor("2"), keyTextSize) {
                                 if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
                                 appendDigit("2")
                             }
-                            NumberButton("3", keySize, keyColor, keyTextSize) {
+                            NumberButton("3", keySize, psyKeyColor("3"), keyTextSize) {
                                 if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
                                 appendDigit("3")
                             }
                         }
 
                         Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                            NumberButton("4", keySize, keyColor, keyTextSize) {
+                            NumberButton("4", keySize, psyKeyColor("4"), keyTextSize) {
                                 if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
                                 appendDigit("4")
                             }
-                            NumberButton("5", keySize, keyColor, keyTextSize) {
+                            NumberButton("5", keySize, psyKeyColor("5"), keyTextSize) {
                                 if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
                                 appendDigit("5")
                             }
-                            NumberButton("6", keySize, keyColor, keyTextSize) {
+                            NumberButton("6", keySize, psyKeyColor("6"), keyTextSize) {
                                 if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
                                 appendDigit("6")
                             }
                         }
 
                         Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                            NumberButton("7", keySize, keyColor, keyTextSize) {
+                            NumberButton("7", keySize, psyKeyColor("7"), keyTextSize) {
                                 if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
                                 appendDigit("7")
                             }
-                            NumberButton("8", keySize, keyColor, keyTextSize) {
+                            NumberButton("8", keySize, psyKeyColor("8"), keyTextSize) {
                                 if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
                                 appendDigit("8")
                             }
-                            NumberButton("9", keySize, keyColor, keyTextSize) {
+                            NumberButton("9", keySize, psyKeyColor("9"), keyTextSize) {
                                 if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
                                 appendDigit("9")
                             }
@@ -1298,19 +1367,21 @@ fun LockScreenEntry(
                                 }
                             }
 
-                            NumberButton("0", keySize, keyColor, keyTextSize) {
+                            NumberButton("0", keySize, psyKeyColor("0"), keyTextSize) {
                                 if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
                                 appendDigit("0")
                             }
 
                             Box(modifier = Modifier.size(keySize), contentAlignment = Alignment.Center) {
                                 Box(
-                                    modifier = Modifier.size(smallKeySize).pointerInput(volumeUpArmed, settings.pinLength, settings.unlockMethod) {
-                                        detectTapGestures(onTap = {
-                                            if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
-                                            submitPin()
-                                        })
-                                    },
+                                    modifier = Modifier.size(smallKeySize)
+                                        .background(if (psyMode && psyPressedKey == "enter") Color(0xFF64B5F6) else Color.Transparent, CircleShape)
+                                        .pointerInput(volumeUpArmed, settings.pinLength, settings.unlockMethod) {
+                                            detectTapGestures(onTap = {
+                                                if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
+                                                submitPin()
+                                            })
+                                        },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text("→|", color = Color.White, fontSize = smallTextSize, fontWeight = FontWeight.Light)
