@@ -711,12 +711,12 @@ fun PsyUnlockSettingsScreen(onBack: () -> Unit) {
                             .weight(1f)
                             .height(58.dp)
                             .background(
-                                if (waitTimeStepSeconds == sec) Color(0xFF2A3A4F) else Color(0xFF1E2D42),
+                                if (waitTimeStepSeconds == sec) Color(0xFF64B5F6) else Color(0xFF1E2D42),
                                 RoundedCornerShape(18.dp)
                             )
                             .clickable {
                                 performHapticFeedback(ctx)
-                                waitTimeStepSeconds = sec
+                                waitTimeStepSeconds = if (waitTimeStepSeconds == sec) 1 else sec
                             },
                         contentAlignment = Alignment.Center
                     ) {
@@ -1731,5 +1731,3 @@ fun LegacySettingsOption(
         }
     }
 }
-
-
