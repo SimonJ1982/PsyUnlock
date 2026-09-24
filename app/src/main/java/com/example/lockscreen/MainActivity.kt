@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.buildAnnotatedString
@@ -59,6 +60,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -134,32 +136,46 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            LockScreenApp(
-                initialScreen = initialScreen,
-                loadSettings = ::loadAllSettings,
-                onSaveBackground = { uri -> saveSettings { it.copy(backgroundUri = uri) } },
-                onSaveLockScreenTextMode = { mode ->
-                    saveSettings { current ->
-                        val newIndicator = if (mode != "date_time" && current.unlockReadyIndicator == "remove_comma") "enter_key_dot" else current.unlockReadyIndicator
-                        current.copy(lockScreenTextMode = mode, unlockReadyIndicator = newIndicator)
+            val configuration = LocalConfiguration.current
+            val originalDensity = LocalDensity.current
+            val layoutScale = minOf(
+                configuration.screenWidthDp / 393f,
+                configuration.screenHeightDp / 852f
+            ).coerceAtMost(1.20f)
+
+            CompositionLocalProvider(
+                LocalDensity provides Density(
+                    density = originalDensity.density * layoutScale,
+                    fontScale = originalDensity.fontScale
+                )
+            ) {
+                LockScreenApp(
+                    initialScreen = initialScreen,
+                    loadSettings = ::loadAllSettings,
+                    onSaveBackground = { uri -> saveSettings { it.copy(backgroundUri = uri) } },
+                    onSaveLockScreenTextMode = { mode ->
+                        saveSettings { current ->
+                            val newIndicator = if (mode != "date_time" && current.unlockReadyIndicator == "remove_comma") "enter_key_dot" else current.unlockReadyIndicator
+                            current.copy(lockScreenTextMode = mode, unlockReadyIndicator = newIndicator)
+                        }
+                    },
+                    onSavePinLength = { len -> saveSettings { it.copy(pinLength = len.coerceIn(4, 6)) } },
+                    onSaveWrongAttemptsLimit = { lim -> saveSettings { it.copy(wrongAttemptsLimit = lim.coerceIn(1, 20)) } },
+                    onSaveUnlockMethod = { method -> saveSettings { it.copy(unlockMethod = method) } },
+                    onSaveHapticEnabled = { en -> saveSettings { it.copy(hapticFeedbackEnabled = en) } },
+                    onSaveUnlockReadyIndicator = { indicator ->
+                        saveSettings { current ->
+                            val valid = indicator != "remove_comma" || current.lockScreenTextMode == "date_time"
+                            if (valid) current.copy(unlockReadyIndicator = indicator) else current
+                        }
+                    },
+                    onSaveOnLaunchScreen = { screen -> saveSettings { it.copy(onLaunchScreen = screen) } },
+                    onUnlock = {
+                        startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        finish()
                     }
-                },
-                onSavePinLength = { len -> saveSettings { it.copy(pinLength = len.coerceIn(4, 6)) } },
-                onSaveWrongAttemptsLimit = { lim -> saveSettings { it.copy(wrongAttemptsLimit = lim.coerceIn(1, 20)) } },
-                onSaveUnlockMethod = { method -> saveSettings { it.copy(unlockMethod = method) } },
-                onSaveHapticEnabled = { en -> saveSettings { it.copy(hapticFeedbackEnabled = en) } },
-                onSaveUnlockReadyIndicator = { indicator ->
-                    saveSettings { current ->
-                        val valid = indicator != "remove_comma" || current.lockScreenTextMode == "date_time"
-                        if (valid) current.copy(unlockReadyIndicator = indicator) else current
-                    }
-                },
-                onSaveOnLaunchScreen = { screen -> saveSettings { it.copy(onLaunchScreen = screen) } },
-                onUnlock = {
-                    startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    finish()
-                }
-            )
+                )
+            }
         }
         forceFullscreen()
     }
@@ -298,7 +314,7 @@ fun LockScreenApp(
             settings = settings.copy(pinLength = psyPinLength),
             resetSignal = FakeLockScreenState.pinResetTrigger,
             onUnlock = onUnlock,
-            onOpenSettings = { currentScreen = "settings" },
+            onOpenSettings = { currentScreen = "psy_settings" },
             psyMode = true
         )
         "psy_settings" -> PsyUnlockSettingsScreen(onBack = { currentScreen = "home" })
