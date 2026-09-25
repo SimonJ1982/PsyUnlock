@@ -311,7 +311,8 @@ fun LockScreenApp(
     Box(modifier = Modifier.fillMaxSize()) {
         when (currentScreen) {
             "home" -> HomeScreen(
-                onInstructions = { currentScreen = "instructions" },
+                onSiUnlockInstructions = { currentScreen = "instructions" },
+                onPsyUnlockInstructions = { currentScreen = "psy_instructions" },
                 onSettings = { currentScreen = "settings" },
                 onPerform = { FakeLockScreenState.fullReset(); wakeSignal = 0; simulatedScreenOff = true; currentScreen = "lockscreen" },
                 onPsyUnlock4PIN = { wakeSignal = 0; simulatedScreenOff = false; currentScreen = "psy_keypad_4" },
@@ -319,6 +320,7 @@ fun LockScreenApp(
                 onPsyUnlockSettings = { currentScreen = "psy_settings" }
             )
             "instructions" -> InstructionsScreen(onBack = { currentScreen = "home" })
+            "psy_instructions" -> PsyUnlockInstructionsScreen(onBack = { currentScreen = "home" })
             "settings" -> SettingsScreen(
                 currentSettings = settings,
                 onUpdateSettings = { settings = it },
@@ -388,7 +390,8 @@ private val DecorativeFont = FontFamily.Serif
 
 @Composable
 fun HomeScreen(
-    onInstructions: () -> Unit,
+    onSiUnlockInstructions: () -> Unit,
+    onPsyUnlockInstructions: () -> Unit,
     onSettings: () -> Unit,
     onPerform: () -> Unit,
     onPsyUnlock4PIN: () -> Unit,
@@ -396,6 +399,7 @@ fun HomeScreen(
     onPsyUnlockSettings: () -> Unit
 ) {
     val ctx = LocalContext.current
+    var instructionsExpanded by remember { mutableStateOf(false) }
     val bgGradient = Brush.verticalGradient(
         colors = listOf(Color(0xFF0F1C2E), Color(0xFF050C15), Color(0xFF02060C))
     )
@@ -428,9 +432,42 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(0.85f),
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                HomeOptionButton(label = "Instructions", subLabel = "") {
+                HomeOptionButton(label = "Instructions", subLabel = "", selected = instructionsExpanded) {
                     performHapticFeedback(ctx)
-                    onInstructions()
+                    instructionsExpanded = !instructionsExpanded
+                }
+                if (instructionsExpanded) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(58.dp)
+                                .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                                .clickable {
+                                    performHapticFeedback(ctx)
+                                    onSiUnlockInstructions()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("SiUnlock", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(58.dp)
+                                .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                                .clickable {
+                                    performHapticFeedback(ctx)
+                                    onPsyUnlockInstructions()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("PsyUnlock", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
                 }
                 HomeOptionButton(label = "SiUnlock Settings", subLabel = "") {
                     performHapticFeedback(ctx)
@@ -459,12 +496,12 @@ fun HomeScreen(
 }
 
 @Composable
-fun HomeOptionButton(label: String, subLabel: String, onClick: () -> Unit) {
+fun HomeOptionButton(label: String, subLabel: String, selected: Boolean = false, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(72.dp)
-            .background(Color(0xFF1E2D42), RoundedCornerShape(20.dp))
+            .background(if (selected) Color(0xFF64B5F6) else Color(0xFF1E2D42), RoundedCornerShape(20.dp))
             .clickable { onClick() }
             .padding(horizontal = 24.dp),
         contentAlignment = Alignment.CenterStart
@@ -1113,6 +1150,98 @@ fun NumberButton(
     ) {
         Text(label, color = Color.White, fontSize = textSize, fontWeight = FontWeight.Light)
     }
+}
+
+@Composable
+fun PsyUnlockInstructionsScreen(onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    val bgGradient = Brush.verticalGradient(
+        colors = listOf(Color(0xFF0F1C2E), Color(0xFF050C15), Color(0xFF02060C))
+    )
+
+    Box(modifier = Modifier.fillMaxSize().background(bgGradient)) {
+        Column(
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp, 32.dp)
+        ) {
+            Text(
+                "Instructions for PsyUnlock",
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(32.dp))
+
+            PsyUnlockInstructionSection(
+                "PIN Setup",
+                "Select PsyUnlock 4PIN or PsyUnlock 6PIN. Enter the chosen number of digits on the first keypad and press Enter to save the PIN."
+            )
+            PsyUnlockInstructionSection(
+                "Submitted Message",
+                "Your entered digits are shown with the word 'submitted' for 3 seconds. PsyUnlock then opens the simulated dark screen."
+            )
+            PsyUnlockInstructionSection(
+                "Lock Screen",
+                "Tap the dark screen to reveal the selected background, time and date. Swipe up to display the second keypad."
+            )
+            PsyUnlockInstructionSection(
+                "Wrong Attempts",
+                "Each complete PIN entered on the second keypad and submitted with Enter shows 'Wrong PIN. Try again.' After the configured number of attempts, a small dot appears below Enter."
+            )
+            PsyUnlockInstructionSection(
+                "Wait Time",
+                "The delay after the last wrong PIN entry before the unlock sequence begins. Set this in PsyUnlock Settings."
+            )
+            PsyUnlockInstructionSection(
+                "Glitch",
+                "When enabled, the glitch effect plays after Wait time for the duration chosen under Glitch length. When disabled, the unlock animation starts without a glitch."
+            )
+            PsyUnlockInstructionSection(
+                "Pause Time",
+                "Controls the pause between button presses during the automatic unlock animation. The timer can be adjusted in half-second increments."
+            )
+            PsyUnlockInstructionSection(
+                "Unlock Animation",
+                "The PIN saved on the first keypad is visibly entered on the second keypad. Enter is pressed automatically, then the app opens the phone's Home screen."
+            )
+            PsyUnlockInstructionSection(
+                "Emergency Call Button",
+                "When no digits are showing, double-tap to open PsyUnlock Settings or hold for 3 seconds to return to the app's Home screen."
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp)
+                    .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp))
+                    .clickable { performHapticFeedback(ctx); onBack() },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Back to Home Screen", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PsyUnlockInstructionSection(title: String, description: String) {
+    Text(
+        title,
+        fontSize = 18.sp,
+        color = Color.White,
+        fontWeight = FontWeight.Bold,
+        textDecoration = TextDecoration.Underline
+    )
+    Spacer(modifier = Modifier.height(6.dp))
+    Text(
+        description,
+        color = Color.White.copy(alpha = 0.85f),
+        fontSize = 15.sp,
+        lineHeight = 22.sp
+    )
+    Spacer(modifier = Modifier.height(20.dp))
 }
 
 @Composable
