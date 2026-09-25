@@ -17,6 +17,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -42,8 +43,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -73,6 +77,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.delay
 import java.util.Date
 import java.util.Locale
+import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
@@ -663,6 +668,11 @@ fun PsyUnlockSettingsScreen(
         )
     }
     var pauseTimeStepMilliseconds by remember { mutableIntStateOf(1000) }
+    var glitchEnabled by remember { mutableStateOf(prefs.getBoolean("psyunlock_glitch_enabled", false)) }
+    var glitchLengthMilliseconds by remember {
+        mutableIntStateOf(prefs.getInt("psyunlock_glitch_length_milliseconds", 5000).coerceAtLeast(0))
+    }
+    var glitchLengthStepMilliseconds by remember { mutableIntStateOf(1000) }
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF02060C))) {
         Column(
@@ -908,6 +918,95 @@ fun PsyUnlockSettingsScreen(
             }
 
             Spacer(modifier = Modifier.height(28.dp))
+            LegacySettingsOption(label = "Glitch", selected = glitchEnabled) {
+                performHapticFeedback(ctx)
+                glitchEnabled = !glitchEnabled
+                prefs.edit { putBoolean("psyunlock_glitch_enabled", glitchEnabled) }
+            }
+            if (glitchEnabled) {
+                Spacer(modifier = Modifier.height(28.dp))
+                Text("Glitch length", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(0.85f),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier.size(58.dp)
+                            .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                            .clickable {
+                                performHapticFeedback(ctx)
+                                if (glitchLengthMilliseconds > 0) {
+                                    glitchLengthMilliseconds = (glitchLengthMilliseconds - glitchLengthStepMilliseconds).coerceAtLeast(0)
+                                    prefs.edit { putInt("psyunlock_glitch_length_milliseconds", glitchLengthMilliseconds) }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("−", color = Color.White, fontSize = 28.sp)
+                    }
+                    Box(
+                        modifier = Modifier.size(96.dp, 58.dp)
+                            .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            if (glitchLengthMilliseconds % 1000 == 0) {
+                                "${glitchLengthMilliseconds / 1000} s"
+                            } else {
+                                "${glitchLengthMilliseconds / 1000}.5 s"
+                            },
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Box(
+                        modifier = Modifier.size(58.dp)
+                            .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                            .clickable {
+                                performHapticFeedback(ctx)
+                                glitchLengthMilliseconds += glitchLengthStepMilliseconds
+                                prefs.edit { putInt("psyunlock_glitch_length_milliseconds", glitchLengthMilliseconds) }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("+", color = Color.White, fontSize = 28.sp)
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(0.85f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    listOf(500, 5000, 10000, 30000).forEach { milliseconds ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(58.dp)
+                                .background(
+                                    if (glitchLengthStepMilliseconds == milliseconds) Color(0xFF64B5F6) else Color(0xFF1E2D42),
+                                    RoundedCornerShape(18.dp)
+                                )
+                                .clickable {
+                                    performHapticFeedback(ctx)
+                                    glitchLengthStepMilliseconds = if (glitchLengthStepMilliseconds == milliseconds) 1000 else milliseconds
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                if (milliseconds == 500) "0.5 s" else "${milliseconds / 1000} s",
+                                color = Color.White,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1122,6 +1221,7 @@ fun LockScreenEntry(
     var psyAutoSequenceRunning by remember { mutableStateOf(false) }
     var psyAutoSubmitReady by remember { mutableStateOf(false) }
     var psyPressedKey by remember { mutableStateOf<String?>(null) }
+    var psyGlitchFrame by remember { mutableIntStateOf(-1) }
 
     val revealThreshold = with(density) { 120.dp.toPx() }
     val maxTravelDistance = with(density) { 340.dp.toPx() }
@@ -1285,6 +1385,17 @@ fun LockScreenEntry(
                 try {
                     val psyPrefs = ctx.getSharedPreferences("lockscreen_settings", Context.MODE_PRIVATE)
                     delay(psyPrefs.getInt("psyunlock_wait_time_seconds", 0).coerceAtLeast(0).seconds)
+                    if (psyPrefs.getBoolean("psyunlock_glitch_enabled", false)) {
+                        val glitchLengthMilliseconds = psyPrefs.getInt("psyunlock_glitch_length_milliseconds", 5000).coerceAtLeast(0)
+                        var glitchElapsed = 0
+                        while (glitchElapsed < glitchLengthMilliseconds) {
+                            psyGlitchFrame += 1
+                            val frameDuration = minOf(50, glitchLengthMilliseconds - glitchElapsed)
+                            delay(frameDuration.milliseconds)
+                            glitchElapsed += frameDuration
+                        }
+                        psyGlitchFrame = -1
+                    }
                     val pauseTimeMilliseconds = psyPrefs.getInt(
                         "psyunlock_pause_time_milliseconds",
                         psyPrefs.getInt("psyunlock_pause_time_seconds", 0).coerceAtLeast(0) * 1000
@@ -1308,6 +1419,7 @@ fun LockScreenEntry(
                         submitPin()
                     }
                 } finally {
+                    psyGlitchFrame = -1
                     psyPressedKey = null
                     psyAutoSequenceRunning = false
                 }
@@ -1334,6 +1446,18 @@ fun LockScreenEntry(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .then(
+                if (psyMode && psyGlitchFrame >= 0) Modifier.graphicsLayer {
+                    translationX = when (psyGlitchFrame % 5) {
+                        0 -> -5f
+                        1 -> 4f
+                        2 -> -2f
+                        3 -> 6f
+                        else -> 0f
+                    } * density.density
+                    translationY = if (psyGlitchFrame % 3 == 0) 2f * density.density else 0f
+                } else Modifier
+            )
             .then(
                 if (!screenRevealed) {
                     Modifier.pointerInput(Unit) {
@@ -1613,6 +1737,72 @@ fun LockScreenEntry(
 
                 Spacer(modifier = Modifier.height(8.dp))
             }
+        }
+        if (psyMode && psyGlitchFrame >= 0) {
+            PsyUnlockGlitchOverlay(psyGlitchFrame)
+        }
+    }
+}
+
+@Composable
+private fun PsyUnlockGlitchOverlay(frame: Int) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val random = Random(frame * 7919 + 3181)
+        val width = size.width
+        val height = size.height
+        val pixelScale = width / 393f
+        val rgb = listOf(Color(0xFFFF1744), Color(0xFF00E5FF), Color(0xFFAA00FF), Color.White)
+
+        if (frame % 6 == 0) {
+            drawRect(Color.White.copy(alpha = 0.14f))
+        }
+        repeat(28) {
+            val y = random.nextFloat() * height
+            val x = random.nextFloat() * width * 0.55f
+            val barWidth = random.nextFloat() * (width - x)
+            val barHeight = (1f + random.nextFloat() * 13f) * pixelScale
+            val color = rgb[random.nextInt(rgb.size)]
+            drawRect(
+                color.copy(alpha = 0.25f + random.nextFloat() * 0.6f),
+                topLeft = Offset(x, y),
+                size = Size(barWidth, barHeight)
+            )
+            drawRect(
+                rgb[random.nextInt(3)].copy(alpha = 0.35f),
+                topLeft = Offset((x + 5f * pixelScale).coerceAtMost(width), y + 2f * pixelScale),
+                size = Size(barWidth, 2f * pixelScale)
+            )
+        }
+        repeat(9) {
+            val y = random.nextFloat() * height
+            val bandHeight = (4f + random.nextFloat() * 20f) * pixelScale
+            drawRect(
+                Color.Black.copy(alpha = 0.4f + random.nextFloat() * 0.48f),
+                topLeft = Offset(0f, y),
+                size = Size(width, bandHeight)
+            )
+            drawRect(
+                rgb[random.nextInt(3)].copy(alpha = 0.50f),
+                topLeft = Offset(0f, y),
+                size = Size(width, 2f * pixelScale)
+            )
+        }
+        repeat(130) {
+            val x = random.nextFloat() * width
+            val y = random.nextFloat() * height
+            drawRect(
+                rgb[random.nextInt(rgb.size)].copy(alpha = 0.2f + random.nextFloat() * 0.7f),
+                topLeft = Offset(x, y),
+                size = Size((1f + random.nextFloat() * 16f) * pixelScale, (1f + random.nextFloat() * 5f) * pixelScale)
+            )
+        }
+        repeat(34) {
+            val y = random.nextFloat() * height
+            drawRect(
+                Color.White.copy(alpha = random.nextFloat() * 0.30f),
+                topLeft = Offset(0f, y),
+                size = Size(width, pixelScale.coerceAtLeast(1f))
+            )
         }
     }
 }
