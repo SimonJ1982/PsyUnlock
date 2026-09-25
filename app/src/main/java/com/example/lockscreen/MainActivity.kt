@@ -9,6 +9,7 @@ import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.view.KeyEvent
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -90,6 +91,18 @@ fun performHapticFeedback(context: Context) {
 class MainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("lockscreen_settings", MODE_PRIVATE) }
     private val fullscreenHandler = Handler(Looper.getMainLooper())
+    private var originalScreenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+
+    private fun updateSimulatedScreenOff(screenOff: Boolean, keepAwake: Boolean) {
+        if (keepAwake) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        val attributes = window.attributes
+        attributes.screenBrightness = if (screenOff) 0.01f else originalScreenBrightness
+        window.attributes = attributes
+    }
 
     data class SettingsSnapshot(
         val backgroundUri: String?,
@@ -132,6 +145,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        originalScreenBrightness = window.attributes.screenBrightness
         makeFullscreen()
         FakeLockScreenState.fullReset()
 
@@ -178,7 +192,8 @@ class MainActivity : ComponentActivity() {
                     onUnlock = {
                         startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         finish()
-                    }
+                    },
+                    onDisplayStateChanged = ::updateSimulatedScreenOff
                 )
             }
         }
@@ -212,6 +227,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         fullscreenHandler.removeCallbacksAndMessages(null)
+        updateSimulatedScreenOff(screenOff = false, keepAwake = false)
         super.onDestroy()
     }
 
@@ -267,68 +283,101 @@ fun LockScreenApp(
     onSaveHapticEnabled: (Boolean) -> Unit,
     onSaveUnlockReadyIndicator: (String) -> Unit,
     onSaveOnLaunchScreen: (String) -> Unit,
-    onUnlock: () -> Unit
+    onUnlock: () -> Unit,
+    onDisplayStateChanged: (Boolean, Boolean) -> Unit
 ) {
     var currentScreen by remember { mutableStateOf(initialScreen) }
     var settings by remember(FakeLockScreenState.pinResetTrigger) { mutableStateOf(loadSettings()) }
     var psyPinLength by remember { mutableIntStateOf(4) }
+    var simulatedScreenOff by remember { mutableStateOf(false) }
+    var wakeSignal by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(FakeLockScreenState.pinResetTrigger) {
         settings = loadSettings()
     }
 
-    when (currentScreen) {
-        "home" -> HomeScreen(
-            onInstructions = { currentScreen = "instructions" },
-            onSettings = { currentScreen = "settings" },
-            onPerform = { FakeLockScreenState.fullReset(); currentScreen = "lockscreen" },
-            onPsyUnlock4PIN = { currentScreen = "psy_keypad_4" },
-            onPsyUnlock6PIN = { currentScreen = "psy_keypad_6" },
-            onPsyUnlockSettings = { currentScreen = "psy_settings" }
-        )
-        "instructions" -> InstructionsScreen(onBack = { currentScreen = "home" })
-        "settings" -> SettingsScreen(
-            currentSettings = settings,
-            onUpdateSettings = { settings = it },
-            onSaveBackground = onSaveBackground,
-            onSaveLockScreenTextMode = onSaveLockScreenTextMode,
-            onSavePinLength = onSavePinLength,
-            onSaveWrongAttemptsLimit = onSaveWrongAttemptsLimit,
-            onSaveUnlockMethod = onSaveUnlockMethod,
-            onSaveHapticEnabled = onSaveHapticEnabled,
-            onSaveUnlockReadyIndicator = onSaveUnlockReadyIndicator,
-            onSaveOnLaunchScreen = onSaveOnLaunchScreen,
-            onBack = { currentScreen = "home" },
-            onPerform = { FakeLockScreenState.fullReset(); currentScreen = "lockscreen" }
-        )
-        "lockscreen" -> LockScreenEntry(
-            settings = settings,
-            resetSignal = FakeLockScreenState.pinResetTrigger,
-            onUnlock = onUnlock,
-            onOpenSettings = { currentScreen = "settings" }
-        )
-        "psy_keypad_4", "psy_keypad_6" -> PsyKeypadScreen(
-            pinLength = if (currentScreen == "psy_keypad_4") 4 else 6,
-            onEnter = { length ->
-                psyPinLength = length
-                FakeLockScreenState.fullReset()
-                currentScreen = "psy_lockscreen"
-            },
-            onBackToHome = { currentScreen = "home" },
-            onOpenPsySettings = { currentScreen = "psy_settings" }
-        )
-        "psy_lockscreen" -> LockScreenEntry(
-            settings = settings.copy(pinLength = psyPinLength),
-            resetSignal = FakeLockScreenState.pinResetTrigger,
-            onUnlock = onUnlock,
-            onOpenSettings = { currentScreen = "psy_settings" },
-            psyMode = true
-        )
-        "psy_settings" -> PsyUnlockSettingsScreen(
-            onBack = { currentScreen = "home" },
-            onPsyUnlock4PIN = { currentScreen = "psy_keypad_4" },
-            onPsyUnlock6PIN = { currentScreen = "psy_keypad_6" }
-        )
+    LaunchedEffect(simulatedScreenOff, currentScreen) {
+        val keepAwake = simulatedScreenOff || currentScreen == "lockscreen" ||
+                currentScreen == "psy_lockscreen" || currentScreen == "psy_keypad_4" ||
+                currentScreen == "psy_keypad_6"
+        onDisplayStateChanged(simulatedScreenOff, keepAwake)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { onDisplayStateChanged(false, false) }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        when (currentScreen) {
+            "home" -> HomeScreen(
+                onInstructions = { currentScreen = "instructions" },
+                onSettings = { currentScreen = "settings" },
+                onPerform = { FakeLockScreenState.fullReset(); wakeSignal = 0; simulatedScreenOff = true; currentScreen = "lockscreen" },
+                onPsyUnlock4PIN = { wakeSignal = 0; simulatedScreenOff = false; currentScreen = "psy_keypad_4" },
+                onPsyUnlock6PIN = { wakeSignal = 0; simulatedScreenOff = false; currentScreen = "psy_keypad_6" },
+                onPsyUnlockSettings = { currentScreen = "psy_settings" }
+            )
+            "instructions" -> InstructionsScreen(onBack = { currentScreen = "home" })
+            "settings" -> SettingsScreen(
+                currentSettings = settings,
+                onUpdateSettings = { settings = it },
+                onSaveBackground = onSaveBackground,
+                onSaveLockScreenTextMode = onSaveLockScreenTextMode,
+                onSavePinLength = onSavePinLength,
+                onSaveWrongAttemptsLimit = onSaveWrongAttemptsLimit,
+                onSaveUnlockMethod = onSaveUnlockMethod,
+                onSaveHapticEnabled = onSaveHapticEnabled,
+                onSaveUnlockReadyIndicator = onSaveUnlockReadyIndicator,
+                onSaveOnLaunchScreen = onSaveOnLaunchScreen,
+                onBack = { currentScreen = "home" },
+                onPerform = { FakeLockScreenState.fullReset(); wakeSignal = 0; simulatedScreenOff = true; currentScreen = "lockscreen" }
+            )
+            "lockscreen" -> LockScreenEntry(
+                settings = settings,
+                resetSignal = FakeLockScreenState.pinResetTrigger,
+                onUnlock = onUnlock,
+                onOpenSettings = { currentScreen = "settings" },
+                wakeSignal = wakeSignal
+            )
+            "psy_keypad_4", "psy_keypad_6" -> PsyKeypadScreen(
+                pinLength = if (currentScreen == "psy_keypad_4") 4 else 6,
+                onEnter = { length ->
+                    psyPinLength = length
+                    FakeLockScreenState.fullReset()
+                    wakeSignal = 0
+                    simulatedScreenOff = true
+                    currentScreen = "psy_lockscreen"
+                },
+                onBackToHome = { currentScreen = "home" },
+                onOpenPsySettings = { currentScreen = "psy_settings" }
+            )
+            "psy_lockscreen" -> LockScreenEntry(
+                settings = settings.copy(pinLength = psyPinLength),
+                resetSignal = FakeLockScreenState.pinResetTrigger,
+                onUnlock = onUnlock,
+                onOpenSettings = { currentScreen = "psy_settings" },
+                psyMode = true,
+                wakeSignal = wakeSignal
+            )
+            "psy_settings" -> PsyUnlockSettingsScreen(
+                onBack = { currentScreen = "home" },
+                onPsyUnlock4PIN = { wakeSignal = 0; simulatedScreenOff = false; currentScreen = "psy_keypad_4" },
+                onPsyUnlock6PIN = { wakeSignal = 0; simulatedScreenOff = false; currentScreen = "psy_keypad_6" }
+            )
+        }
+        if (simulatedScreenOff) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .pointerInput(Unit) {
+                        detectTapGestures {
+                            simulatedScreenOff = false
+                            wakeSignal += 1
+                        }
+                    }
+            )
+        }
     }
 }
 
@@ -376,15 +425,15 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(0.85f),
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                HomeOptionButton(label = "Instructions", subLabel = "How to use") {
+                HomeOptionButton(label = "Instructions", subLabel = "") {
                     performHapticFeedback(ctx)
                     onInstructions()
                 }
-                HomeOptionButton(label = "Settings", subLabel = "Configure your preferences") {
+                HomeOptionButton(label = "SiUnlock Settings", subLabel = "") {
                     performHapticFeedback(ctx)
                     onSettings()
                 }
-                HomeOptionButton(label = "Perform", subLabel = "Launch lock screen") {
+                HomeOptionButton(label = "Perform SiUnlock", subLabel = "") {
                     performHapticFeedback(ctx)
                     onPerform()
                 }
@@ -449,7 +498,7 @@ fun PsyKeypadScreen(
 
     LaunchedEffect(submittedPin) {
         if (submittedPin != null) {
-            delay(900.milliseconds)
+            delay(3.seconds)
             onEnter(pinLength)
         }
     }
@@ -1205,7 +1254,8 @@ fun LockScreenEntry(
     resetSignal: Int,
     onUnlock: () -> Unit,
     onOpenSettings: () -> Unit,
-    psyMode: Boolean = false
+    psyMode: Boolean = false,
+    wakeSignal: Int = 0
 ) {
     val ctx = LocalContext.current
     val density = LocalDensity.current
@@ -1222,6 +1272,10 @@ fun LockScreenEntry(
     var psyAutoSubmitReady by remember { mutableStateOf(false) }
     var psyPressedKey by remember { mutableStateOf<String?>(null) }
     var psyGlitchFrame by remember { mutableIntStateOf(-1) }
+
+    LaunchedEffect(wakeSignal) {
+        if (wakeSignal > 0) showQuickGlance = true
+    }
 
     val revealThreshold = with(density) { 120.dp.toPx() }
     val maxTravelDistance = with(density) { 340.dp.toPx() }
