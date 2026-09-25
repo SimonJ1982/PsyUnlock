@@ -654,8 +654,15 @@ fun PsyUnlockSettingsScreen(
     var attemptLimit by remember { mutableIntStateOf(prefs.getInt("psyunlock_wrong_attempts_limit", 3).coerceIn(1, 20)) }
     var waitTimeSeconds by remember { mutableIntStateOf(prefs.getInt("psyunlock_wait_time_seconds", 0).coerceAtLeast(0)) }
     var waitTimeStepSeconds by remember { mutableIntStateOf(1) }
-    var pauseTimeSeconds by remember { mutableIntStateOf(prefs.getInt("psyunlock_pause_time_seconds", 0).coerceAtLeast(0)) }
-    var pauseTimeStepSeconds by remember { mutableIntStateOf(1) }
+    var pauseTimeMilliseconds by remember {
+        mutableIntStateOf(
+            prefs.getInt(
+                "psyunlock_pause_time_milliseconds",
+                prefs.getInt("psyunlock_pause_time_seconds", 0).coerceAtLeast(0) * 1000
+            ).coerceAtLeast(0)
+        )
+    }
+    var pauseTimeStepMilliseconds by remember { mutableIntStateOf(1000) }
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF02060C))) {
         Column(
@@ -831,9 +838,9 @@ fun PsyUnlockSettingsScreen(
                         .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
                         .clickable {
                             performHapticFeedback(ctx)
-                            if (pauseTimeSeconds > 0) {
-                                pauseTimeSeconds = (pauseTimeSeconds - pauseTimeStepSeconds).coerceAtLeast(0)
-                                prefs.edit { putInt("psyunlock_pause_time_seconds", pauseTimeSeconds) }
+                            if (pauseTimeMilliseconds > 0) {
+                                pauseTimeMilliseconds = (pauseTimeMilliseconds - pauseTimeStepMilliseconds).coerceAtLeast(0)
+                                prefs.edit { putInt("psyunlock_pause_time_milliseconds", pauseTimeMilliseconds) }
                             }
                         },
                     contentAlignment = Alignment.Center
@@ -846,7 +853,11 @@ fun PsyUnlockSettingsScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "$pauseTimeSeconds s",
+                        if (pauseTimeMilliseconds % 1000 == 0) {
+                            "${pauseTimeMilliseconds / 1000} s"
+                        } else {
+                            "${pauseTimeMilliseconds / 1000}.5 s"
+                        },
                         color = Color.White,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Medium
@@ -857,8 +868,8 @@ fun PsyUnlockSettingsScreen(
                         .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
                         .clickable {
                             performHapticFeedback(ctx)
-                            pauseTimeSeconds += pauseTimeStepSeconds
-                            prefs.edit { putInt("psyunlock_pause_time_seconds", pauseTimeSeconds) }
+                            pauseTimeMilliseconds += pauseTimeStepMilliseconds
+                            prefs.edit { putInt("psyunlock_pause_time_milliseconds", pauseTimeMilliseconds) }
                         },
                     contentAlignment = Alignment.Center
                 ) {
@@ -871,23 +882,23 @@ fun PsyUnlockSettingsScreen(
                 modifier = Modifier.fillMaxWidth(0.85f),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                listOf(5, 10, 30).forEach { sec ->
+                listOf(500, 5000, 10000, 30000).forEach { milliseconds ->
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .height(58.dp)
                             .background(
-                                if (pauseTimeStepSeconds == sec) Color(0xFF64B5F6) else Color(0xFF1E2D42),
+                                if (pauseTimeStepMilliseconds == milliseconds) Color(0xFF64B5F6) else Color(0xFF1E2D42),
                                 RoundedCornerShape(18.dp)
                             )
                             .clickable {
                                 performHapticFeedback(ctx)
-                                pauseTimeStepSeconds = if (pauseTimeStepSeconds == sec) 1 else sec
+                                pauseTimeStepMilliseconds = if (pauseTimeStepMilliseconds == milliseconds) 1000 else milliseconds
                             },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            "$sec s",
+                            if (milliseconds == 500) "0.5 s" else "${milliseconds / 1000} s",
                             color = Color.White,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Medium
@@ -1274,7 +1285,10 @@ fun LockScreenEntry(
                 try {
                     val psyPrefs = ctx.getSharedPreferences("lockscreen_settings", Context.MODE_PRIVATE)
                     delay(psyPrefs.getInt("psyunlock_wait_time_seconds", 0).coerceAtLeast(0).seconds)
-                    val pauseTimeSeconds = psyPrefs.getInt("psyunlock_pause_time_seconds", 0).coerceAtLeast(0)
+                    val pauseTimeMilliseconds = psyPrefs.getInt(
+                        "psyunlock_pause_time_milliseconds",
+                        psyPrefs.getInt("psyunlock_pause_time_seconds", 0).coerceAtLeast(0) * 1000
+                    ).coerceAtLeast(0)
                     val savedPinKey = if (settings.pinLength == 4) "psyunlock_4pin" else "psyunlock_6pin"
                     val savedPin = psyPrefs.getString(savedPinKey, null)
                     if (savedPin != null && savedPin.length == settings.pinLength && savedPin.all { it.isDigit() }) {
@@ -1286,7 +1300,7 @@ fun LockScreenEntry(
                             enteredPin += digit
                             delay(180.milliseconds)
                             psyPressedKey = null
-                            delay(pauseTimeSeconds.seconds)
+                            delay(pauseTimeMilliseconds.milliseconds)
                         }
                         psyPressedKey = "enter"
                         delay(240.milliseconds)
