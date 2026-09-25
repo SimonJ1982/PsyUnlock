@@ -76,6 +76,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Date
 import java.util.Locale
 import kotlin.random.Random
@@ -337,6 +338,7 @@ fun LockScreenApp(
                 resetSignal = FakeLockScreenState.pinResetTrigger,
                 onUnlock = onUnlock,
                 onOpenSettings = { currentScreen = "settings" },
+                onReturnHome = { currentScreen = "home" },
                 wakeSignal = wakeSignal
             )
             "psy_keypad_4", "psy_keypad_6" -> PsyKeypadScreen(
@@ -356,6 +358,7 @@ fun LockScreenApp(
                 resetSignal = FakeLockScreenState.pinResetTrigger,
                 onUnlock = onUnlock,
                 onOpenSettings = { currentScreen = "psy_settings" },
+                onReturnHome = { currentScreen = "home" },
                 psyMode = true,
                 wakeSignal = wakeSignal
             )
@@ -1254,6 +1257,7 @@ fun LockScreenEntry(
     resetSignal: Int,
     onUnlock: () -> Unit,
     onOpenSettings: () -> Unit,
+    onReturnHome: () -> Unit,
     psyMode: Boolean = false,
     wakeSignal: Int = 0
 ) {
@@ -1773,11 +1777,24 @@ fun LockScreenEntry(
                                 .width(194.dp)
                                 .height(64.dp)
                                 .background(keyColor, CircleShape)
-                                .pointerInput(Unit) {
-                                    detectTapGestures(onDoubleTap = {
-                                        if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
-                                        onOpenSettings()
-                                    })
+                                .pointerInput(enteredPin.isEmpty()) {
+                                    detectTapGestures(
+                                        onPress = {
+                                            if (enteredPin.isEmpty() &&
+                                                withTimeoutOrNull(3.seconds) { tryAwaitRelease() } == null &&
+                                                enteredPin.isEmpty()
+                                            ) {
+                                                if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
+                                                onReturnHome()
+                                            }
+                                        },
+                                        onDoubleTap = {
+                                            if (enteredPin.isEmpty()) {
+                                                if (settings.hapticFeedbackEnabled) performHapticFeedback(ctx)
+                                                onOpenSettings()
+                                            }
+                                        }
+                                    )
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -1903,7 +1920,7 @@ fun SettingsScreen(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Options", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
+            Text("SiUnlock Settings", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
             Spacer(modifier = Modifier.height(30.dp))
 
             Text("On launch", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
@@ -1962,7 +1979,7 @@ fun SettingsScreen(
             AnimatedVisibility(visible = currentSettings.unlockMethod == "wrong_attempts") {
                 Column {
                     Spacer(modifier = Modifier.height(20.dp))
-                    Text("Attempts before unlock", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                    Text("Attempts before unlock", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         "After this many wrong tries, the next correct PIN unlocks automatically.",
@@ -2027,7 +2044,7 @@ fun SettingsScreen(
             LegacySettingsOption("Date and time", selected = currentSettings.lockScreenTextMode == "date_time") {
                 performHapticFeedback(ctx)
                 onSaveLockScreenTextMode("date_time")
-                val newShownBy = if (currentSettings.unlockReadyIndicator == "remove_comma") "remove_comma" else "enter_key_dot"
+                val newShownBy = "remove_comma"
                 onSaveUnlockReadyIndicator(newShownBy)
                 onUpdateSettings(
                     currentSettings.copy(
@@ -2079,7 +2096,7 @@ fun SettingsScreen(
             }
 
             Spacer(modifier = Modifier.height(28.dp))
-            Text("Haptic feedback", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+            Text("Vibrations", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(modifier = Modifier.height(12.dp))
 
             LegacySettingsOption(
@@ -2162,7 +2179,7 @@ fun SettingsScreen(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "PERFORM",
+                    text = "Perform SiUnlock",
                     color = Color.White,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
