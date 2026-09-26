@@ -299,8 +299,8 @@ fun LockScreenApp(
 
     LaunchedEffect(simulatedScreenOff, currentScreen) {
         val keepAwake = simulatedScreenOff || currentScreen == "lockscreen" ||
-                currentScreen == "psy_lockscreen" || currentScreen == "psy_keypad_4" ||
-                currentScreen == "psy_keypad_6"
+                currentScreen == "psy_lockscreen" || currentScreen == "psy_keypad" ||
+                currentScreen == "psy_keypad_4" || currentScreen == "psy_keypad_6"
         onDisplayStateChanged(simulatedScreenOff, keepAwake)
     }
 
@@ -315,9 +315,13 @@ fun LockScreenApp(
                 onPsyUnlockInstructions = { currentScreen = "psy_instructions" },
                 onSettings = { currentScreen = "settings" },
                 onPerform = { FakeLockScreenState.fullReset(); wakeSignal = 0; simulatedScreenOff = true; currentScreen = "lockscreen" },
-                onPsyUnlock4PIN = { wakeSignal = 0; simulatedScreenOff = false; currentScreen = "psy_keypad_4" },
-                onPsyUnlock6PIN = { wakeSignal = 0; simulatedScreenOff = false; currentScreen = "psy_keypad_6" },
-                onPsyUnlockSettings = { currentScreen = "psy_settings" }
+                onPsyUnlockPerform = { wakeSignal = 0; simulatedScreenOff = false; currentScreen = "psy_keypad" },
+                onPsyUnlockPinChoice = { currentScreen = "psy_settings" }
+            )
+            "psy_pin_choice" -> PsyUnlockPinChoiceScreen(
+                onChoose4PIN = { wakeSignal = 0; simulatedScreenOff = false; currentScreen = "psy_keypad_4" },
+                onChoose6PIN = { wakeSignal = 0; simulatedScreenOff = false; currentScreen = "psy_keypad_6" },
+                onBack = { currentScreen = "home" }
             )
             "instructions" -> InstructionsScreen(onBack = { currentScreen = "home" })
             "psy_instructions" -> PsyUnlockInstructionsScreen(onBack = { currentScreen = "home" })
@@ -343,8 +347,12 @@ fun LockScreenApp(
                 onReturnHome = { currentScreen = "home" },
                 wakeSignal = wakeSignal
             )
-            "psy_keypad_4", "psy_keypad_6" -> PsyKeypadScreen(
-                pinLength = if (currentScreen == "psy_keypad_4") 4 else 6,
+            "psy_keypad", "psy_keypad_4", "psy_keypad_6" -> PsyKeypadScreen(
+                pinLength = when (currentScreen) {
+                    "psy_keypad_4" -> 4
+                    "psy_keypad_6" -> 6
+                    else -> 0
+                },
                 onEnter = { length ->
                     psyPinLength = length
                     FakeLockScreenState.fullReset()
@@ -366,8 +374,7 @@ fun LockScreenApp(
             )
             "psy_settings" -> PsyUnlockSettingsScreen(
                 onBack = { currentScreen = "home" },
-                onPsyUnlock4PIN = { wakeSignal = 0; simulatedScreenOff = false; currentScreen = "psy_keypad_4" },
-                onPsyUnlock6PIN = { wakeSignal = 0; simulatedScreenOff = false; currentScreen = "psy_keypad_6" }
+                onPerform = { wakeSignal = 0; simulatedScreenOff = false; currentScreen = "psy_keypad" }
             )
         }
         if (simulatedScreenOff) {
@@ -394,12 +401,13 @@ fun HomeScreen(
     onPsyUnlockInstructions: () -> Unit,
     onSettings: () -> Unit,
     onPerform: () -> Unit,
-    onPsyUnlock4PIN: () -> Unit,
-    onPsyUnlock6PIN: () -> Unit,
-    onPsyUnlockSettings: () -> Unit
+    onPsyUnlockPerform: () -> Unit,
+    onPsyUnlockPinChoice: () -> Unit
 ) {
     val ctx = LocalContext.current
     var instructionsExpanded by remember { mutableStateOf(false) }
+    var settingsExpanded by remember { mutableStateOf(false) }
+    var performExpanded by remember { mutableStateOf(false) }
     val bgGradient = Brush.verticalGradient(
         colors = listOf(Color(0xFF0F1C2E), Color(0xFF050C15), Color(0xFF02060C))
     )
@@ -469,28 +477,149 @@ fun HomeScreen(
                         }
                     }
                 }
-                HomeOptionButton(label = "SiUnlock Settings", subLabel = "") {
+                HomeOptionButton(label = "Settings", subLabel = "", selected = settingsExpanded) {
                     performHapticFeedback(ctx)
-                    onSettings()
+                    settingsExpanded = !settingsExpanded
                 }
-                HomeOptionButton(label = "Perform SiUnlock", subLabel = "") {
-                    performHapticFeedback(ctx)
-                    onPerform()
+                if (settingsExpanded) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(58.dp)
+                                .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                                .clickable {
+                                    performHapticFeedback(ctx)
+                                    onSettings()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("SiUnlock", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(58.dp)
+                                .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                                .clickable {
+                                    performHapticFeedback(ctx)
+                                    onPsyUnlockPinChoice()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("PsyUnlock", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
                 }
-                HomeOptionButton(label = "PsyUnlock 4PIN", subLabel = "") {
+                HomeOptionButton(label = "Perform", subLabel = "", selected = performExpanded) {
                     performHapticFeedback(ctx)
-                    onPsyUnlock4PIN()
+                    performExpanded = !performExpanded
                 }
-                HomeOptionButton(label = "PsyUnlock 6PIN", subLabel = "") {
-                    performHapticFeedback(ctx)
-                    onPsyUnlock6PIN()
-                }
-                HomeOptionButton(label = "PsyUnlock Settings", subLabel = "") {
-                    performHapticFeedback(ctx)
-                    onPsyUnlockSettings()
+                if (performExpanded) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(58.dp)
+                                .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                                .clickable {
+                                    performHapticFeedback(ctx)
+                                    onPerform()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("SiUnlock", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(58.dp)
+                                .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                                .clickable {
+                                    performHapticFeedback(ctx)
+                                    onPsyUnlockPerform()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("PsyUnlock", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
                 }
             }
             Spacer(modifier = Modifier.weight(1.5f))
+        }
+    }
+}
+
+@Composable
+fun PsyUnlockPinChoiceScreen(
+    onChoose4PIN: () -> Unit,
+    onChoose6PIN: () -> Unit,
+    onBack: () -> Unit
+) {
+    val ctx = LocalContext.current
+    val bgGradient = Brush.verticalGradient(
+        colors = listOf(Color(0xFF0F1C2E), Color(0xFF050C15), Color(0xFF02060C))
+    )
+
+    Box(modifier = Modifier.fillMaxSize().background(bgGradient)) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                "PsyUnlock",
+                color = Color.White,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("Select PIN length", color = Color.White.copy(alpha = 0.75f), fontSize = 18.sp)
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(58.dp)
+                        .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                        .clickable { performHapticFeedback(ctx); onChoose4PIN() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("4PIN", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(58.dp)
+                        .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                        .clickable { performHapticFeedback(ctx); onChoose6PIN() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("6PIN", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(24.dp)
+                .height(58.dp)
+                .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp))
+                .clickable { performHapticFeedback(ctx); onBack() },
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Back to Home Screen", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
         }
     }
 }
@@ -527,7 +656,8 @@ fun PsyKeypadScreen(
         ctx.getSharedPreferences("lockscreen_settings", Context.MODE_PRIVATE)
     }
 
-    val savedPinKey = if (pinLength == 4) {
+    var selectedPinLength by remember(pinLength) { mutableIntStateOf(pinLength) }
+    val savedPinKey = if (selectedPinLength == 4) {
         "psyunlock_4pin"
     } else {
         "psyunlock_6pin"
@@ -539,12 +669,12 @@ fun PsyKeypadScreen(
     LaunchedEffect(submittedPin) {
         if (submittedPin != null) {
             delay(3.seconds)
-            onEnter(pinLength)
+            onEnter(selectedPinLength)
         }
     }
 
     fun appendDigit(digit: String) {
-        if (enteredPin.length < pinLength) {
+        if (selectedPinLength != 0 && enteredPin.length < selectedPinLength) {
             enteredPin += digit
         }
     }
@@ -556,7 +686,7 @@ fun PsyKeypadScreen(
     }
 
     fun savePinAndContinue() {
-        if (enteredPin.length == pinLength) {
+        if (selectedPinLength != 0 && enteredPin.length == selectedPinLength) {
             prefs.edit {
                 putString(savedPinKey, enteredPin)
             }
@@ -574,7 +704,7 @@ fun PsyKeypadScreen(
     val keyTextSize = 26.67.sp
     val smallTextSize = keyTextSize * 0.75f
     val keyColor = Color(0xFF707070)
-    val enterEnabled = enteredPin.length == pinLength
+    val enterEnabled = selectedPinLength != 0 && enteredPin.length == selectedPinLength
 
     Box(modifier = Modifier.fillMaxSize().background(bgGradient)) {
         Column(
@@ -584,7 +714,7 @@ fun PsyKeypadScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "Enter $pinLength digits",
+                text = if (selectedPinLength == 0) "Select PIN length" else "Enter $selectedPinLength digits",
                 color = Color.White,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Medium,
@@ -594,7 +724,7 @@ fun PsyKeypadScreen(
             Spacer(modifier = Modifier.height(28.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(13.dp)) {
-                repeat(pinLength) { index ->
+                repeat(selectedPinLength) { index ->
                     val filled = index < enteredPin.length
                     Box(modifier = Modifier.size(pinDotDiameter), contentAlignment = Alignment.Center) {
                         if (filled) Text(enteredPin[index].toString(), color = Color.White, fontSize = 22.sp)
@@ -691,6 +821,34 @@ fun PsyKeypadScreen(
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.height(smallKeySize))
+            Row(
+                modifier = Modifier.fillMaxWidth(0.85f),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                listOf(4, 6).forEach { length ->
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(58.dp)
+                            .background(
+                                if (selectedPinLength == length) Color(0xFF64B5F6) else Color(0xFF1E2D42),
+                                RoundedCornerShape(18.dp)
+                            )
+                            .clickable(enabled = submittedPin == null) {
+                                performHapticFeedback(ctx)
+                                if (selectedPinLength != length) {
+                                    selectedPinLength = length
+                                    enteredPin = ""
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("${length}PIN", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
         }
         if (submittedPin != null) {
             Box(
@@ -705,33 +863,32 @@ fun PsyKeypadScreen(
             }
         }
 
-        Column(
+        Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .weight(1f)
                     .height(58.dp)
                     .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp))
                     .clickable { performHapticFeedback(ctx); onBackToHome() },
                 contentAlignment = Alignment.Center
             ) {
-                Text("Back to Home Screen", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                Text("Home Screen", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
             }
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .weight(1f)
                     .height(58.dp)
                     .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp))
                     .clickable { performHapticFeedback(ctx); onOpenPsySettings() },
                 contentAlignment = Alignment.Center
             ) {
-                Text("PsyUnlock Setting", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                Text("Settings", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
             }
         }
     }
@@ -740,8 +897,7 @@ fun PsyKeypadScreen(
 @Composable
 fun PsyUnlockSettingsScreen(
     onBack: () -> Unit,
-    onPsyUnlock4PIN: () -> Unit,
-    onPsyUnlock6PIN: () -> Unit
+    onPerform: () -> Unit
 ) {
     val ctx = LocalContext.current
     val prefs = remember(ctx) { ctx.getSharedPreferences("lockscreen_settings", Context.MODE_PRIVATE) }
@@ -1101,21 +1257,10 @@ fun PsyUnlockSettingsScreen(
                     .fillMaxWidth()
                     .height(58.dp)
                     .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp))
-                    .clickable { performHapticFeedback(ctx); onPsyUnlock4PIN() },
+                    .clickable { performHapticFeedback(ctx); onPerform() },
                 contentAlignment = Alignment.Center
             ) {
-                Text("Perform PsyUnlock 4PIN", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
-            }
-            Spacer(modifier = Modifier.height(10.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(58.dp)
-                    .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp))
-                    .clickable { performHapticFeedback(ctx); onPsyUnlock6PIN() },
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Perform PsyUnlock 6PIN", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                Text("Perform", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
             }
             Spacer(modifier = Modifier.height(10.dp))
             Box(
