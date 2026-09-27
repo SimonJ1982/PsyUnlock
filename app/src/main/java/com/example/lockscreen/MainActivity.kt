@@ -17,8 +17,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -29,10 +31,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -45,16 +47,23 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -66,6 +75,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -80,6 +90,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Date
 import java.util.Locale
 import kotlin.random.Random
+import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
@@ -92,7 +103,7 @@ fun performHapticFeedback(context: Context) {
 class MainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("lockscreen_settings", MODE_PRIVATE) }
     private val fullscreenHandler = Handler(Looper.getMainLooper())
-    private var originalScreenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+    private var originalScreenBrightness: Float by kotlin.properties.Delegates.notNull()
 
     private fun updateSimulatedScreenOff(screenOff: Boolean, keepAwake: Boolean) {
         if (keepAwake) {
@@ -189,7 +200,6 @@ class MainActivity : ComponentActivity() {
                             if (valid) current.copy(unlockReadyIndicator = indicator) else current
                         }
                     },
-                    onSaveOnLaunchScreen = { screen -> saveSettings { it.copy(onLaunchScreen = screen) } },
                     onUnlock = {
                         startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).setFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         finish()
@@ -283,7 +293,6 @@ fun LockScreenApp(
     onSaveUnlockMethod: (String) -> Unit,
     onSaveHapticEnabled: (Boolean) -> Unit,
     onSaveUnlockReadyIndicator: (String) -> Unit,
-    onSaveOnLaunchScreen: (String) -> Unit,
     onUnlock: () -> Unit,
     onDisplayStateChanged: (Boolean, Boolean) -> Unit
 ) {
@@ -323,8 +332,14 @@ fun LockScreenApp(
                 onChoose6PIN = { wakeSignal = 0; simulatedScreenOff = false; currentScreen = "psy_keypad_6" },
                 onBack = { currentScreen = "home" }
             )
-            "instructions" -> InstructionsScreen(onBack = { currentScreen = "home" })
-            "psy_instructions" -> PsyUnlockInstructionsScreen(onBack = { currentScreen = "home" })
+            "instructions" -> InstructionsScreen(
+                onBack = { currentScreen = "home" },
+                onPsyUnlockInstructions = { currentScreen = "psy_instructions" }
+            )
+            "psy_instructions" -> PsyUnlockInstructionsScreen(
+                onBack = { currentScreen = "home" },
+                onSiUnlockInstructions = { currentScreen = "instructions" }
+            )
             "settings" -> SettingsScreen(
                 currentSettings = settings,
                 onUpdateSettings = { settings = it },
@@ -335,7 +350,6 @@ fun LockScreenApp(
                 onSaveUnlockMethod = onSaveUnlockMethod,
                 onSaveHapticEnabled = onSaveHapticEnabled,
                 onSaveUnlockReadyIndicator = onSaveUnlockReadyIndicator,
-                onSaveOnLaunchScreen = onSaveOnLaunchScreen,
                 onBack = { currentScreen = "home" },
                 onPerform = { FakeLockScreenState.fullReset(); wakeSignal = 0; simulatedScreenOff = true; currentScreen = "lockscreen" }
             )
@@ -373,6 +387,11 @@ fun LockScreenApp(
                 wakeSignal = wakeSignal
             )
             "psy_settings" -> PsyUnlockSettingsScreen(
+                currentSettings = settings,
+                onUpdateSettings = { settings = it },
+                onSaveLockScreenTextMode = onSaveLockScreenTextMode,
+                onSaveUnlockReadyIndicator = onSaveUnlockReadyIndicator,
+                onSaveHapticEnabled = onSaveHapticEnabled,
                 onBack = { currentScreen = "home" },
                 onPerform = { wakeSignal = 0; simulatedScreenOff = false; currentScreen = "psy_keypad" }
             )
@@ -554,6 +573,23 @@ fun HomeScreen(
             }
             Spacer(modifier = Modifier.weight(1.5f))
         }
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "Created by",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 12.sp
+            )
+            Text(
+                "Box Room Industries",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 12.sp
+            )
+        }
     }
 }
 
@@ -633,7 +669,7 @@ fun HomeOptionButton(label: String, subLabel: String, selected: Boolean = false,
             .background(if (selected) Color(0xFF64B5F6) else Color(0xFF1E2D42), RoundedCornerShape(20.dp))
             .clickable { onClick() }
             .padding(horizontal = 24.dp),
-        contentAlignment = Alignment.CenterStart
+        contentAlignment = Alignment.Center
     ) {
         Column {
             Text(label, fontSize = 20.sp, fontWeight = FontWeight.Medium, color = Color.White)
@@ -668,9 +704,13 @@ fun PsyKeypadScreen(
 
     LaunchedEffect(submittedPin) {
         if (submittedPin != null) {
-            delay(3.seconds)
+            delay(prefs.getInt("psyunlock_submitted_time_seconds", 3).coerceAtLeast(1).seconds)
             onEnter(selectedPinLength)
         }
+    }
+
+    fun hapticOnKeyPress() {
+        if (prefs.getBoolean("haptic_feedback_enabled", true)) performHapticFeedback(ctx)
     }
 
     fun appendDigit(digit: String) {
@@ -705,8 +745,17 @@ fun PsyKeypadScreen(
     val smallTextSize = keyTextSize * 0.75f
     val keyColor = Color(0xFF707070)
     val enterEnabled = selectedPinLength != 0 && enteredPin.length == selectedPinLength
+    var keypadScreenTop by remember { mutableFloatStateOf(0f) }
+    var lengthButtonsBottom by remember { mutableFloatStateOf(0f) }
+    var navigationButtonsTop by remember { mutableFloatStateOf(0f) }
+    var submittedMessageHeight by remember { mutableIntStateOf(0) }
 
-    Box(modifier = Modifier.fillMaxSize().background(bgGradient)) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(bgGradient)
+            .onGloballyPositioned { keypadScreenTop = it.positionInRoot().y }
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -723,16 +772,19 @@ fun PsyKeypadScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(13.dp)) {
-                repeat(selectedPinLength) { index ->
-                    val filled = index < enteredPin.length
-                    Box(modifier = Modifier.size(pinDotDiameter), contentAlignment = Alignment.Center) {
-                        if (filled) Text(enteredPin[index].toString(), color = Color.White, fontSize = 22.sp)
+            Box(
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(13.dp)) {
+                    repeat(selectedPinLength) { index ->
+                        val filled = index < enteredPin.length
+                        Box(modifier = Modifier.size(pinDotDiameter), contentAlignment = Alignment.Center) {
+                            if (filled) Text(enteredPin[index].toString(), color = Color.White, fontSize = 22.sp)
+                        }
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(48.dp))
 
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -740,43 +792,43 @@ fun PsyKeypadScreen(
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
                     NumberButton("1", keySize, keyColor, keyTextSize) {
-                        performHapticFeedback(ctx)
+                        hapticOnKeyPress()
                         appendDigit("1")
                     }
                     NumberButton("2", keySize, keyColor, keyTextSize) {
-                        performHapticFeedback(ctx)
+                        hapticOnKeyPress()
                         appendDigit("2")
                     }
                     NumberButton("3", keySize, keyColor, keyTextSize) {
-                        performHapticFeedback(ctx)
+                        hapticOnKeyPress()
                         appendDigit("3")
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
                     NumberButton("4", keySize, keyColor, keyTextSize) {
-                        performHapticFeedback(ctx)
+                        hapticOnKeyPress()
                         appendDigit("4")
                     }
                     NumberButton("5", keySize, keyColor, keyTextSize) {
-                        performHapticFeedback(ctx)
+                        hapticOnKeyPress()
                         appendDigit("5")
                     }
                     NumberButton("6", keySize, keyColor, keyTextSize) {
-                        performHapticFeedback(ctx)
+                        hapticOnKeyPress()
                         appendDigit("6")
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
                     NumberButton("7", keySize, keyColor, keyTextSize) {
-                        performHapticFeedback(ctx)
+                        hapticOnKeyPress()
                         appendDigit("7")
                     }
                     NumberButton("8", keySize, keyColor, keyTextSize) {
-                        performHapticFeedback(ctx)
+                        hapticOnKeyPress()
                         appendDigit("8")
                     }
                     NumberButton("9", keySize, keyColor, keyTextSize) {
-                        performHapticFeedback(ctx)
+                        hapticOnKeyPress()
                         appendDigit("9")
                     }
                 }
@@ -790,7 +842,7 @@ fun PsyKeypadScreen(
                             modifier = Modifier
                                 .size(smallKeySize)
                                 .clickable {
-                                    performHapticFeedback(ctx)
+                                    hapticOnKeyPress()
                                     deleteLast()
                                 },
                             contentAlignment = Alignment.Center
@@ -799,7 +851,7 @@ fun PsyKeypadScreen(
                         }
                     }
                     NumberButton("0", keySize, keyColor, keyTextSize) {
-                        performHapticFeedback(ctx)
+                        hapticOnKeyPress()
                         appendDigit("0")
                     }
                     Box(modifier = Modifier.size(keySize), contentAlignment = Alignment.Center) {
@@ -811,7 +863,7 @@ fun PsyKeypadScreen(
                                     CircleShape
                                 )
                                 .clickable(enabled = enterEnabled) {
-                                    performHapticFeedback(ctx)
+                                    hapticOnKeyPress()
                                     savePinAndContinue()
                                 },
                             contentAlignment = Alignment.Center
@@ -824,7 +876,11 @@ fun PsyKeypadScreen(
 
             Spacer(modifier = Modifier.height(smallKeySize))
             Row(
-                modifier = Modifier.fillMaxWidth(0.85f),
+                modifier = Modifier
+                    .fillMaxWidth(0.85f)
+                    .onGloballyPositioned {
+                        lengthButtonsBottom = it.positionInRoot().y + it.size.height
+                    },
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 listOf(4, 6).forEach { length ->
@@ -851,14 +907,27 @@ fun PsyKeypadScreen(
             }
         }
         if (submittedPin != null) {
-            Box(
-                modifier = Modifier.fillMaxHeight(0.75f).align(Alignment.TopCenter),
-                contentAlignment = Alignment.BottomCenter
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .onSizeChanged { submittedMessageHeight = it.height }
+                    .offset {
+                        IntOffset(
+                            0,
+                            ((lengthButtonsBottom + navigationButtonsTop - submittedMessageHeight) / 2f - keypadScreenTop).roundToInt()
+                        )
+                    },
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    "$submittedPin submitted",
+                    "PIN Submitted",
                     color = Color.White,
                     fontSize = 18.sp
+                )
+                Text(
+                    "$submittedPin",
+                    color = Color.White,
+                    fontSize = 54.sp
                 )
             }
         }
@@ -867,7 +936,8 @@ fun PsyKeypadScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+                .padding(start = 24.dp, end = 24.dp, bottom = 24.dp)
+                .onGloballyPositioned { navigationButtonsTop = it.positionInRoot().y },
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Box(
@@ -895,7 +965,56 @@ fun PsyKeypadScreen(
 }
 
 @Composable
+private fun PsyUnlockSettingsSection(
+    heading: String,
+    description: String,
+    expanded: Boolean,
+    showTick: Boolean = false,
+    onClick: () -> Unit
+) {
+    val shape = RoundedCornerShape(22.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 88.dp)
+            .background(
+                Brush.verticalGradient(
+                    if (expanded) listOf(Color(0xFF64B5F6), Color(0xFF64B5F6))
+                    else listOf(Color(0xFF1C3B5D), Color(0xFF142D49))
+                ),
+                shape
+            )
+            .border(1.dp, if (expanded) Color(0xFF64B5F6) else Color(0xFF315B7D), shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(modifier = Modifier.weight(1f)) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(heading, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(5.dp))
+                Text(description, color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+            }
+            if (showTick) {
+                Text(
+                    "✓",
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.TopEnd)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun PsyUnlockSettingsScreen(
+    currentSettings: MainActivity.SettingsSnapshot,
+    onUpdateSettings: (MainActivity.SettingsSnapshot) -> Unit,
+    onSaveLockScreenTextMode: (String) -> Unit,
+    onSaveUnlockReadyIndicator: (String) -> Unit,
+    onSaveHapticEnabled: (Boolean) -> Unit,
     onBack: () -> Unit,
     onPerform: () -> Unit
 ) {
@@ -913,11 +1032,32 @@ fun PsyUnlockSettingsScreen(
         )
     }
     var pauseTimeStepMilliseconds by remember { mutableIntStateOf(1000) }
-    var glitchEnabled by remember { mutableStateOf(prefs.getBoolean("psyunlock_glitch_enabled", false)) }
+    var submittedTimeSeconds by remember {
+        mutableIntStateOf(prefs.getInt("psyunlock_submitted_time_seconds", 3).coerceAtLeast(1))
+    }
     var glitchLengthMilliseconds by remember {
-        mutableIntStateOf(prefs.getInt("psyunlock_glitch_length_milliseconds", 5000).coerceAtLeast(0))
+        mutableIntStateOf(prefs.getInt("psyunlock_glitch_length_milliseconds", 0).coerceAtLeast(0))
     }
     var glitchLengthStepMilliseconds by remember { mutableIntStateOf(1000) }
+    var showGlitchLength by remember { mutableStateOf(false) }
+    var showDisplay by remember { mutableStateOf(false) }
+    var showWrongAttempts by remember { mutableStateOf(false) }
+    var showWaitTime by remember { mutableStateOf(false) }
+    var showPauseTime by remember { mutableStateOf(false) }
+    var showSubmittedTime by remember { mutableStateOf(false) }
+    var showVibrations by remember { mutableStateOf(false) }
+    var isPerforming by remember { mutableStateOf(false) }
+    val lockCloseProgress by animateFloatAsState(
+        targetValue = if (isPerforming) 1f else 0f,
+        animationSpec = tween(durationMillis = 1500),
+        label = "psyUnlockLockClose"
+    )
+    LaunchedEffect(isPerforming) {
+        if (isPerforming) {
+            delay(1500.milliseconds)
+            onPerform()
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF02060C))) {
         Column(
@@ -932,244 +1072,357 @@ fun PsyUnlockSettingsScreen(
             )
             Spacer(modifier = Modifier.height(30.dp))
 
-            Text("Wrong attempts", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                "Number of wrong tries before next correct PIN unlocks automatically",
-                color = Color.White.copy(alpha = 0.65f),
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(0.85f),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier.size(58.dp)
-                        .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
-                        .clickable {
-                            performHapticFeedback(ctx)
-                            if (attemptLimit > 1) {
-                                attemptLimit -= 1
-                                prefs.edit { putInt("psyunlock_wrong_attempts_limit", attemptLimit) }
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("−", color = Color.White, fontSize = 28.sp)
+            PsyUnlockSettingsSection(
+                heading = "Lock screen display",
+                expanded = showDisplay,
+                description = "Choose what is shown on the lock screen.",
+                onClick = {
+                    performHapticFeedback(ctx)
+                    showDisplay = !showDisplay
                 }
-                Box(
-                    modifier = Modifier.size(96.dp, 58.dp)
-                        .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "$attemptLimit",
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Medium
+            )
+            if (showDisplay) {
+                Spacer(modifier = Modifier.height(12.dp))
+                LegacySettingsOption("Date and time", selected = currentSettings.lockScreenTextMode == "date_time") {
+                    performHapticFeedback(ctx)
+                    onSaveLockScreenTextMode("date_time")
+                    val newShownBy = "remove_comma"
+                    onSaveUnlockReadyIndicator(newShownBy)
+                    onUpdateSettings(
+                        currentSettings.copy(
+                            lockScreenTextMode = "date_time",
+                            unlockReadyIndicator = newShownBy
+                        )
                     )
                 }
-                Box(
-                    modifier = Modifier.size(58.dp)
-                        .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
-                        .clickable {
-                            performHapticFeedback(ctx)
-                            if (attemptLimit < 20) {
-                                attemptLimit += 1
-                                prefs.edit { putInt("psyunlock_wrong_attempts_limit", attemptLimit) }
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("+", color = Color.White, fontSize = 28.sp)
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                LegacySettingsOption("'Enter PIN' message", selected = currentSettings.lockScreenTextMode == "message") {
+                    performHapticFeedback(ctx)
+                    onSaveLockScreenTextMode("message")
+                    onSaveUnlockReadyIndicator("enter_key_dot")
+                    onUpdateSettings(
+                        currentSettings.copy(
+                            lockScreenTextMode = "message",
+                            unlockReadyIndicator = "enter_key_dot"
+                        )
+                    )
                 }
             }
+            Spacer(modifier = Modifier.height(14.dp))
 
-            Spacer(modifier = Modifier.height(28.dp))
-            Text("Wait time", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                "The length of time from the last wrong PIN entry to the start of unlock animation.",
-                color = Color.White.copy(alpha = 0.65f),
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center
+            PsyUnlockSettingsSection(
+                heading = "Wrong attempts",
+                expanded = showWrongAttempts,
+                description = "Number of wrong tries before next correct PIN unlocks automatically",
+                onClick = {
+                    performHapticFeedback(ctx)
+                    showWrongAttempts = !showWrongAttempts
+                }
             )
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(0.85f),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier.size(58.dp)
-                        .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
-                        .clickable {
-                            performHapticFeedback(ctx)
-                            if (waitTimeSeconds > 0) {
-                                waitTimeSeconds = (waitTimeSeconds - waitTimeStepSeconds).coerceAtLeast(0)
+            if (showWrongAttempts) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(0.85f),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier.size(58.dp)
+                            .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                            .clickable {
+                                performHapticFeedback(ctx)
+                                if (attemptLimit > 1) {
+                                    attemptLimit -= 1
+                                    prefs.edit { putInt("psyunlock_wrong_attempts_limit", attemptLimit) }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("−", color = Color.White, fontSize = 28.sp)
+                    }
+                    Box(
+                        modifier = Modifier.size(96.dp, 58.dp)
+                            .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "$attemptLimit",
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Box(
+                        modifier = Modifier.size(58.dp)
+                            .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                            .clickable {
+                                performHapticFeedback(ctx)
+                                if (attemptLimit < 20) {
+                                    attemptLimit += 1
+                                    prefs.edit { putInt("psyunlock_wrong_attempts_limit", attemptLimit) }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("+", color = Color.White, fontSize = 28.sp)
+                    }
+                }
+
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+            PsyUnlockSettingsSection(
+                heading = "Wait time",
+                expanded = showWaitTime,
+                description = "The length of time from the last wrong PIN entry to the start of unlock animation.",
+                onClick = {
+                    performHapticFeedback(ctx)
+                    showWaitTime = !showWaitTime
+                }
+            )
+            if (showWaitTime) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(0.85f),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier.size(58.dp)
+                            .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                            .clickable {
+                                performHapticFeedback(ctx)
+                                if (waitTimeSeconds > 0) {
+                                    waitTimeSeconds = (waitTimeSeconds - waitTimeStepSeconds).coerceAtLeast(0)
+                                    prefs.edit { putInt("psyunlock_wait_time_seconds", waitTimeSeconds) }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("−", color = Color.White, fontSize = 28.sp)
+                    }
+                    Box(
+                        modifier = Modifier.size(96.dp, 58.dp)
+                            .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "$waitTimeSeconds s",
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Box(
+                        modifier = Modifier.size(58.dp)
+                            .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                            .clickable {
+                                performHapticFeedback(ctx)
+                                waitTimeSeconds += waitTimeStepSeconds
                                 prefs.edit { putInt("psyunlock_wait_time_seconds", waitTimeSeconds) }
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("−", color = Color.White, fontSize = 28.sp)
-                }
-                Box(
-                    modifier = Modifier.size(96.dp, 58.dp)
-                        .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "$waitTimeSeconds s",
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                Box(
-                    modifier = Modifier.size(58.dp)
-                        .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
-                        .clickable {
-                            performHapticFeedback(ctx)
-                            waitTimeSeconds += waitTimeStepSeconds
-                            prefs.edit { putInt("psyunlock_wait_time_seconds", waitTimeSeconds) }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("+", color = Color.White, fontSize = 28.sp)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(0.85f),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                listOf(5, 10, 30).forEach { sec ->
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(58.dp)
-                            .background(
-                                if (waitTimeStepSeconds == sec) Color(0xFF64B5F6) else Color(0xFF1E2D42),
-                                RoundedCornerShape(18.dp)
-                            )
-                            .clickable {
-                                performHapticFeedback(ctx)
-                                waitTimeStepSeconds = if (waitTimeStepSeconds == sec) 1 else sec
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            "$sec s",
-                            color = Color.White,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Text("+", color = Color.White, fontSize = 28.sp)
                     }
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(0.85f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    listOf(5, 10, 30).forEach { sec ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(58.dp)
+                                .background(
+                                    if (waitTimeStepSeconds == sec) Color(0xFF64B5F6) else Color(0xFF1E2D42),
+                                    RoundedCornerShape(18.dp)
+                                )
+                                .clickable {
+                                    performHapticFeedback(ctx)
+                                    waitTimeStepSeconds = if (waitTimeStepSeconds == sec) 1 else sec
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "$sec s",
+                                color = Color.White,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
-            Text("Pause time", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                "The pause between button presses in the unlock animation",
-                color = Color.White.copy(alpha = 0.65f),
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center
+            Spacer(modifier = Modifier.height(14.dp))
+            PsyUnlockSettingsSection(
+                heading = "Pause time",
+                expanded = showPauseTime,
+                description = "The pause between button presses in the unlock animation",
+                onClick = {
+                    performHapticFeedback(ctx)
+                    showPauseTime = !showPauseTime
+                }
             )
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(0.85f),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier.size(58.dp)
-                        .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
-                        .clickable {
-                            performHapticFeedback(ctx)
-                            if (pauseTimeMilliseconds > 0) {
-                                pauseTimeMilliseconds = (pauseTimeMilliseconds - pauseTimeStepMilliseconds).coerceAtLeast(0)
-                                prefs.edit { putInt("psyunlock_pause_time_milliseconds", pauseTimeMilliseconds) }
-                            }
-                        },
-                    contentAlignment = Alignment.Center
+            if (showPauseTime) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(0.85f),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("−", color = Color.White, fontSize = 28.sp)
-                }
-                Box(
-                    modifier = Modifier.size(96.dp, 58.dp)
-                        .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        if (pauseTimeMilliseconds % 1000 == 0) {
-                            "${pauseTimeMilliseconds / 1000} s"
-                        } else {
-                            "${pauseTimeMilliseconds / 1000}.5 s"
-                        },
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                Box(
-                    modifier = Modifier.size(58.dp)
-                        .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
-                        .clickable {
-                            performHapticFeedback(ctx)
-                            pauseTimeMilliseconds += pauseTimeStepMilliseconds
-                            prefs.edit { putInt("psyunlock_pause_time_milliseconds", pauseTimeMilliseconds) }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("+", color = Color.White, fontSize = 28.sp)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(0.85f),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                listOf(500, 5000, 10000, 30000).forEach { milliseconds ->
                     Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(58.dp)
-                            .background(
-                                if (pauseTimeStepMilliseconds == milliseconds) Color(0xFF64B5F6) else Color(0xFF1E2D42),
-                                RoundedCornerShape(18.dp)
-                            )
+                        modifier = Modifier.size(58.dp)
+                            .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
                             .clickable {
                                 performHapticFeedback(ctx)
-                                pauseTimeStepMilliseconds = if (pauseTimeStepMilliseconds == milliseconds) 1000 else milliseconds
+                                if (pauseTimeMilliseconds > 0) {
+                                    pauseTimeMilliseconds = (pauseTimeMilliseconds - pauseTimeStepMilliseconds).coerceAtLeast(0)
+                                    prefs.edit { putInt("psyunlock_pause_time_milliseconds", pauseTimeMilliseconds) }
+                                }
                             },
                         contentAlignment = Alignment.Center
                     ) {
+                        Text("−", color = Color.White, fontSize = 28.sp)
+                    }
+                    Box(
+                        modifier = Modifier.size(96.dp, 58.dp)
+                            .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
-                            if (milliseconds == 500) "0.5 s" else "${milliseconds / 1000} s",
+                            if (pauseTimeMilliseconds % 1000 == 0) {
+                                "${pauseTimeMilliseconds / 1000} s"
+                            } else {
+                                "${pauseTimeMilliseconds / 1000}.5 s"
+                            },
                             color = Color.White,
-                            fontSize = 18.sp,
+                            fontSize = 20.sp,
                             fontWeight = FontWeight.Medium
                         )
+                    }
+                    Box(
+                        modifier = Modifier.size(58.dp)
+                            .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                            .clickable {
+                                performHapticFeedback(ctx)
+                                pauseTimeMilliseconds += pauseTimeStepMilliseconds
+                                prefs.edit { putInt("psyunlock_pause_time_milliseconds", pauseTimeMilliseconds) }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("+", color = Color.White, fontSize = 28.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(0.85f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    listOf(500, 5000, 10000, 30000).forEach { milliseconds ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(58.dp)
+                                .background(
+                                    if (pauseTimeStepMilliseconds == milliseconds) Color(0xFF64B5F6) else Color(0xFF1E2D42),
+                                    RoundedCornerShape(18.dp)
+                                )
+                                .clickable {
+                                    performHapticFeedback(ctx)
+                                    pauseTimeStepMilliseconds = if (pauseTimeStepMilliseconds == milliseconds) 1000 else milliseconds
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                if (milliseconds == 500) "0.5 s" else "${milliseconds / 1000} s",
+                                color = Color.White,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+            PsyUnlockSettingsSection(
+                heading = "Submitted time",
+                expanded = showSubmittedTime,
+                description = "Length of time the confirmed PIN will show before opening the performance keypad.",
+                onClick = {
+                    performHapticFeedback(ctx)
+                    showSubmittedTime = !showSubmittedTime
+                }
+            )
+            if (showSubmittedTime) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(0.85f),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier.size(58.dp)
+                            .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                            .clickable {
+                                performHapticFeedback(ctx)
+                                submittedTimeSeconds = (submittedTimeSeconds - 1).coerceAtLeast(1)
+                                prefs.edit { putInt("psyunlock_submitted_time_seconds", submittedTimeSeconds) }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("−", color = Color.White, fontSize = 28.sp)
+                    }
+                    Box(
+                        modifier = Modifier.size(96.dp, 58.dp)
+                            .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "$submittedTimeSeconds s",
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Box(
+                        modifier = Modifier.size(58.dp)
+                            .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                            .clickable {
+                                performHapticFeedback(ctx)
+                                submittedTimeSeconds += 1
+                                prefs.edit { putInt("psyunlock_submitted_time_seconds", submittedTimeSeconds) }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("+", color = Color.White, fontSize = 28.sp)
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
-            LegacySettingsOption(label = "Glitch", selected = glitchEnabled) {
-                performHapticFeedback(ctx)
-                glitchEnabled = !glitchEnabled
-                prefs.edit { putBoolean("psyunlock_glitch_enabled", glitchEnabled) }
-            }
-            if (glitchEnabled) {
-                Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(14.dp))
+            PsyUnlockSettingsSection(
+                heading = "Glitch",
+                expanded = showGlitchLength,
+                description = "Length of time Glitch will play before unlock PIN is entered. Set time to 0 if you don't want the Glitch feature.",
+                showTick = glitchLengthMilliseconds > 0,
+                onClick = {
+                    performHapticFeedback(ctx)
+                    showGlitchLength = !showGlitchLength
+                }
+            )
+            if (showGlitchLength) {
+                Spacer(modifier = Modifier.height(12.dp))
                 Text("Glitch length", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
@@ -1251,29 +1504,90 @@ fun PsyUnlockSettingsScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(14.dp))
+            PsyUnlockSettingsSection(
+                heading = "Vibrations",
+                expanded = showVibrations,
+                description = "Enable/Disable vibrations on key presses.",
+                onClick = {
+                    performHapticFeedback(ctx)
+                    showVibrations = !showVibrations
+                }
+            )
+            if (showVibrations) {
+                Spacer(modifier = Modifier.height(12.dp))
+                LegacySettingsOption(
+                    label = "Enabled",
+                    selected = currentSettings.hapticFeedbackEnabled
+                ) {
+                    performHapticFeedback(ctx)
+                    onSaveHapticEnabled(true)
+                    onUpdateSettings(currentSettings.copy(hapticFeedbackEnabled = true))
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                LegacySettingsOption(
+                    label = "Disabled",
+                    selected = !currentSettings.hapticFeedbackEnabled
+                ) {
+                    performHapticFeedback(ctx)
+                    onSaveHapticEnabled(false)
+                    onUpdateSettings(currentSettings.copy(hapticFeedbackEnabled = false))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(58.dp)
-                    .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp))
-                    .clickable { performHapticFeedback(ctx); onPerform() },
+                    .height(66.dp)
+                    .background(
+                        Brush.verticalGradient(listOf(Color(0xFF20456C), Color(0xFF142D4C))),
+                        RoundedCornerShape(20.dp)
+                    )
+                    .border(1.dp, Color(0xFF35678C), RoundedCornerShape(20.dp))
+                    .clickable(enabled = !isPerforming) {
+                        performHapticFeedback(ctx)
+                        isPerforming = true
+                    },
                 contentAlignment = Alignment.Center
             ) {
-                Text("Perform", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SiUnlockAnimatedLockIcon(progress = lockCloseProgress)
+                    Text("Perform PsyUnlock", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                }
             }
-            Spacer(modifier = Modifier.height(10.dp))
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(58.dp)
-                    .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp))
-                    .clickable { performHapticFeedback(ctx); onBack() },
+                    .height(66.dp)
+                    .background(
+                        Brush.verticalGradient(listOf(Color(0xFF20456C), Color(0xFF142D4C))),
+                        RoundedCornerShape(20.dp)
+                    )
+                    .border(1.dp, Color(0xFF35678C), RoundedCornerShape(20.dp))
+                    .clickable {
+                        performHapticFeedback(ctx)
+                        onBack()
+                    },
                 contentAlignment = Alignment.Center
             ) {
-                Text("Back to Home Screen", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("⌂", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                    Text("Back to Home Screen", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                }
             }
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }
@@ -1298,8 +1612,7 @@ fun NumberButton(
 }
 
 @Composable
-fun PsyUnlockInstructionsScreen(onBack: () -> Unit) {
-    val ctx = LocalContext.current
+fun PsyUnlockInstructionsScreen(onBack: () -> Unit, onSiUnlockInstructions: () -> Unit) {
     val bgGradient = Brush.verticalGradient(
         colors = listOf(Color(0xFF0F1C2E), Color(0xFF050C15), Color(0xFF02060C))
     )
@@ -1320,35 +1633,39 @@ fun PsyUnlockInstructionsScreen(onBack: () -> Unit) {
 
             PsyUnlockInstructionSection(
                 "PIN Setup",
-                "Select PsyUnlock 4PIN or PsyUnlock 6PIN. Enter the chosen number of digits on the first keypad and press Enter to save the PIN."
+                "When you enter the app you will first choose 4 or 6 digits. You cannot enter anything before this. Enter your selected amount of digits and press enter. Your PIN will be confirmed and the screen will go dark.\n\nTap the dark screen to reveal the selected background, time and date. Swipe up to display the second keypad."
             )
             PsyUnlockInstructionSection(
-                "Submitted Message",
-                "Your entered digits are shown with the word 'submitted' for 3 seconds. PsyUnlock then opens the simulated dark screen."
-            )
-            PsyUnlockInstructionSection(
-                "Lock Screen",
-                "Tap the dark screen to reveal the selected background, time and date. Swipe up to display the second keypad."
+                "Lock Screen Display",
+                "Date & Time — Shows current time and date on the lock screen.\n\nEnter PIN Message — Shows 'Enter PIN' instead of the date/time."
             )
             PsyUnlockInstructionSection(
                 "Wrong Attempts",
-                "Each complete PIN entered on the second keypad and submitted with Enter shows 'Wrong PIN. Try again.' After the configured number of attempts, a small dot appears below Enter."
+                "Each complete PIN entered on the second keypad and submitted with Enter shows 'Wrong PIN. Try again.' After the configured number of attempts, a small dot appears below the enter key."
             )
             PsyUnlockInstructionSection(
                 "Wait Time",
-                "The delay after the last wrong PIN entry before the unlock sequence begins. Set this in PsyUnlock Settings."
-            )
-            PsyUnlockInstructionSection(
-                "Glitch",
-                "When enabled, the glitch effect plays after Wait time for the duration chosen under Glitch length. When disabled, the unlock animation starts without a glitch."
+                "The delay after the last wrong PIN entry before the unlock sequence begins."
             )
             PsyUnlockInstructionSection(
                 "Pause Time",
                 "Controls the pause between button presses during the automatic unlock animation. The timer can be adjusted in half-second increments."
             )
             PsyUnlockInstructionSection(
-                "Unlock Animation",
-                "The PIN saved on the first keypad is visibly entered on the second keypad. Enter is pressed automatically, then the app opens the phone's Home screen."
+                "Submitted Time",
+                "This is the length of time that the confirmed PIN will show before the screen goes dark."
+            )
+            PsyUnlockInstructionSection(
+                "Glitch",
+                "When enabled, the glitch effect plays after Wait time for the duration chosen under Glitch length. When disabled, the unlock animation starts without a glitch. Setting the timer to 0 will stop the glitch effect."
+            )
+            PsyUnlockInstructionSection(
+                "Vibrations",
+                "You can choose if your phone vibrates when keys are pressed."
+            )
+            PsyUnlockInstructionSection(
+                "Reset the app",
+                "At any time during the presentation pressing the volume down button will rest the app to the original locked state. This means you will either need to press the volume up button or input your chosen amount of wrong attempts. The indicator will also reset."
             )
             PsyUnlockInstructionSection(
                 "Emergency Call Button",
@@ -1356,16 +1673,43 @@ fun PsyUnlockInstructionsScreen(onBack: () -> Unit) {
             )
 
             Spacer(modifier = Modifier.height(16.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(58.dp)
-                    .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp))
-                    .clickable { performHapticFeedback(ctx); onBack() },
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Back to Home Screen", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+            InstructionsNavigationButton(label = "SiUnlock Instructions", onClick = onSiUnlockInstructions)
+            Spacer(modifier = Modifier.height(12.dp))
+            InstructionsNavigationButton(label = "Back to Home Screen", onClick = onBack, showHomeIcon = true)
+        }
+    }
+}
+
+@Composable
+private fun InstructionsNavigationButton(
+    label: String,
+    onClick: () -> Unit,
+    showHomeIcon: Boolean = false
+) {
+    val ctx = LocalContext.current
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(66.dp)
+            .background(
+                Brush.verticalGradient(listOf(Color(0xFF20456C), Color(0xFF142D4C))),
+                RoundedCornerShape(20.dp)
+            )
+            .border(1.dp, Color(0xFF35678C), RoundedCornerShape(20.dp))
+            .clickable {
+                performHapticFeedback(ctx)
+                onClick()
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (showHomeIcon) {
+                Text("⌂", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             }
+            Text(label, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -1390,8 +1734,7 @@ private fun PsyUnlockInstructionSection(title: String, description: String) {
 }
 
 @Composable
-fun InstructionsScreen(onBack: () -> Unit) {
-    val ctx = LocalContext.current
+fun InstructionsScreen(onBack: () -> Unit, onPsyUnlockInstructions: () -> Unit) {
     val bgGradient = Brush.verticalGradient(
         colors = listOf(Color(0xFF0F1C2E), Color(0xFF050C15), Color(0xFF02060C))
     )
@@ -1435,14 +1778,14 @@ fun InstructionsScreen(onBack: () -> Unit) {
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                "Volume Up Button — Press Volume Up to prime the unlock sequence.",
+                "Volume Up Button — Press Volume Up to prime the app to unlock on the next PIN entry when the enter key is pressed.",
                 color = Color.White.copy(alpha = 0.85f),
                 fontSize = 15.sp,
                 lineHeight = 22.sp
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                "Wrong Attempts — After a set number of wrong PIN entries, the next correct PIN unlocks automatically.",
+                "Wrong Attempts — After a set number of wrong PIN entries, the next correct PIN unlocks the phone when the enter key is pressed.",
                 color = Color.White.copy(alpha = 0.85f),
                 fontSize = 15.sp,
                 lineHeight = 22.sp
@@ -1473,7 +1816,7 @@ fun InstructionsScreen(onBack: () -> Unit) {
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                "Ready Indicator",
+                "Unlock ready Indicator",
                 fontSize = 18.sp,
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
@@ -1481,7 +1824,7 @@ fun InstructionsScreen(onBack: () -> Unit) {
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                "Remove Comma — The comma disappears from the date when the screen is ready to unlock.",
+                "Remove Comma — The comma disappears from the date when the screen is ready to unlock – this is only available when Date & Time is set as the Lock Screen Display.",
                 color = Color.White.copy(alpha = 0.85f),
                 fontSize = 15.sp,
                 lineHeight = 22.sp
@@ -1496,7 +1839,7 @@ fun InstructionsScreen(onBack: () -> Unit) {
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                "Feedback",
+                "Vibrations",
                 fontSize = 18.sp,
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
@@ -1504,23 +1847,63 @@ fun InstructionsScreen(onBack: () -> Unit) {
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                "Haptic Feedback — Your phone vibrates when you tap buttons.",
+                "You can choose if your phone vibrates when keys are pressed.",
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 15.sp,
+                lineHeight = 22.sp
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                "Background image",
+                fontSize = 18.sp,
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                textDecoration = TextDecoration.Underline
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                "You can select and image from your picture reel to show as your lock screen. Selecting Default will just show a black screen.",
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 15.sp,
+                lineHeight = 22.sp
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                "Reset the app",
+                fontSize = 18.sp,
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                textDecoration = TextDecoration.Underline
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                "At any time during the presentation pressing the volume down button will rest the app to the original locked state. This means you will either need to press the volume up button or input your chosen amount of wrong attempts. The indicator will also reset.",
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 15.sp,
+                lineHeight = 22.sp
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                "Emergency call button",
+                fontSize = 18.sp,
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                textDecoration = TextDecoration.Underline
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                "When there are no digits selected a double tap will take you to the settings screen, a long press will take you back to the Home Screen.",
                 color = Color.White.copy(alpha = 0.85f),
                 fontSize = 15.sp,
                 lineHeight = 22.sp
             )
             Spacer(modifier = Modifier.height(36.dp))
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(58.dp)
-                    .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp))
-                    .clickable { performHapticFeedback(ctx); onBack() },
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Back to Home Screen", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
-            }
+            InstructionsNavigationButton(label = "PsyUnlock Instructions", onClick = onPsyUnlockInstructions)
+            Spacer(modifier = Modifier.height(12.dp))
+            InstructionsNavigationButton(label = "Back to Home Screen", onClick = onBack, showHomeIcon = true)
         }
     }
 }
@@ -1717,8 +2100,8 @@ fun LockScreenEntry(
                 try {
                     val psyPrefs = ctx.getSharedPreferences("lockscreen_settings", Context.MODE_PRIVATE)
                     delay(psyPrefs.getInt("psyunlock_wait_time_seconds", 0).coerceAtLeast(0).seconds)
-                    if (psyPrefs.getBoolean("psyunlock_glitch_enabled", false)) {
-                        val glitchLengthMilliseconds = psyPrefs.getInt("psyunlock_glitch_length_milliseconds", 5000).coerceAtLeast(0)
+                    val glitchLengthMilliseconds = psyPrefs.getInt("psyunlock_glitch_length_milliseconds", 0).coerceAtLeast(0)
+                    if (glitchLengthMilliseconds > 0) {
                         var glitchElapsed = 0
                         while (glitchElapsed < glitchLengthMilliseconds) {
                             psyGlitchFrame += 1
@@ -2163,7 +2546,6 @@ fun SettingsScreen(
     onSaveUnlockMethod: (String) -> Unit,
     onSaveHapticEnabled: (Boolean) -> Unit,
     onSaveUnlockReadyIndicator: (String) -> Unit,
-    onSaveOnLaunchScreen: (String) -> Unit,
     onBack: () -> Unit,
     onPerform: () -> Unit
 ) {
@@ -2189,296 +2571,460 @@ fun SettingsScreen(
         }
     }
 
+    var showPinLength by remember { mutableStateOf(false) }
+    var showUnlockMethod by remember { mutableStateOf(false) }
+    var showDisplay by remember { mutableStateOf(false) }
+    var showReady by remember { mutableStateOf(false) }
+    var showVibrations by remember { mutableStateOf(false) }
+    var showBackground by remember { mutableStateOf(false) }
+    var isPerforming by remember { mutableStateOf(false) }
+    val lockCloseProgress by animateFloatAsState(
+        targetValue = if (isPerforming) 1f else 0f,
+        animationSpec = tween(durationMillis = 1500),
+        label = "siUnlockLockClose"
+    )
+    LaunchedEffect(isPerforming) {
+        if (isPerforming) {
+            delay(1500.milliseconds)
+            onPerform()
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF02060C))) {
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("SiUnlock Settings", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(modifier = Modifier.height(30.dp))
-
-            Text("On launch", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-            Spacer(modifier = Modifier.height(12.dp))
-
-            LegacySettingsOption("Home Screen", selected = currentSettings.onLaunchScreen == "home") {
-                performHapticFeedback(ctx)
-                onSaveOnLaunchScreen("home")
-                onUpdateSettings(currentSettings.copy(onLaunchScreen = "home"))
+            Box(modifier = Modifier.fillMaxWidth().height(58.dp)) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .size(48.dp)
+                        .background(Color(0xFF1E2D42), RoundedCornerShape(16.dp))
+                        .clickable {
+                            performHapticFeedback(ctx)
+                            onBack()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("‹", color = Color.White, fontSize = 38.sp)
+                }
+                Text(
+                    "SiUnlock Settings",
+                    color = Color.White,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.align(Alignment.Center)
+                )
             }
+            Spacer(modifier = Modifier.height(22.dp))
+            SiUnlockSettingsSection(
+                heading = "PIN length",
+                expanded = showPinLength,
+                description = "Choose whether to use a 4 or 6 digit PIN.",
+                onClick = {
+                    performHapticFeedback(ctx)
+                    showPinLength = !showPinLength
+                }
+            )
+            if (showPinLength) {
+                Spacer(modifier = Modifier.height(12.dp))
+                LegacySettingsOption("4 digits", selected = currentSettings.pinLength == 4) {
+                    performHapticFeedback(ctx)
+                    onSavePinLength(4)
+                    onUpdateSettings(currentSettings.copy(pinLength = 4))
+                }
 
-            Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-            LegacySettingsOption("Direct to lock screen", selected = currentSettings.onLaunchScreen == "no_home") {
-                performHapticFeedback(ctx)
-                onSaveOnLaunchScreen("no_home")
-                onUpdateSettings(currentSettings.copy(onLaunchScreen = "no_home"))
+                LegacySettingsOption("6 digits", selected = currentSettings.pinLength == 6) {
+                    performHapticFeedback(ctx)
+                    onSavePinLength(6)
+                    onUpdateSettings(currentSettings.copy(pinLength = 6))
+                }
             }
+            Spacer(modifier = Modifier.height(14.dp))
 
-            Spacer(modifier = Modifier.height(28.dp))
-            Text("PIN length", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-            Spacer(modifier = Modifier.height(12.dp))
+            SiUnlockSettingsSection(
+                heading = "Unlock method",
+                expanded = showUnlockMethod,
+                description = "Choose how the device is primed for unlock.",
+                onClick = {
+                    performHapticFeedback(ctx)
+                    showUnlockMethod = !showUnlockMethod
+                }
+            )
+            if (showUnlockMethod) {
+                Spacer(modifier = Modifier.height(12.dp))
+                LegacySettingsOption("Volume Up button", selected = currentSettings.unlockMethod == "volume_up") {
+                    performHapticFeedback(ctx)
+                    onSaveUnlockMethod("volume_up")
+                    onUpdateSettings(currentSettings.copy(unlockMethod = "volume_up"))
+                }
 
-            LegacySettingsOption("4 digits", selected = currentSettings.pinLength == 4) {
-                performHapticFeedback(ctx)
-                onSavePinLength(4)
-                onUpdateSettings(currentSettings.copy(pinLength = 4))
-            }
+                Spacer(modifier = Modifier.height(10.dp))
 
-            Spacer(modifier = Modifier.height(10.dp))
+                LegacySettingsOption("Wrong attempts", selected = currentSettings.unlockMethod == "wrong_attempts") {
+                    performHapticFeedback(ctx)
+                    onSaveUnlockMethod("wrong_attempts")
+                    onUpdateSettings(currentSettings.copy(unlockMethod = "wrong_attempts"))
+                }
 
-            LegacySettingsOption("6 digits", selected = currentSettings.pinLength == 6) {
-                performHapticFeedback(ctx)
-                onSavePinLength(6)
-                onUpdateSettings(currentSettings.copy(pinLength = 6))
-            }
+                AnimatedVisibility(visible = currentSettings.unlockMethod == "wrong_attempts") {
+                    Column {
+                        Spacer(modifier = Modifier.height(20.dp))
+                        Text("Attempts before unlock", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "After this many wrong tries, the next correct PIN unlocks automatically.",
+                            color = Color.White.copy(alpha = 0.65f),
+                            fontSize = 14.sp,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
 
-            Spacer(modifier = Modifier.height(28.dp))
-            Text("Unlock method", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-            Spacer(modifier = Modifier.height(12.dp))
-
-            LegacySettingsOption("Volume Up button", selected = currentSettings.unlockMethod == "volume_up") {
-                performHapticFeedback(ctx)
-                onSaveUnlockMethod("volume_up")
-                onUpdateSettings(currentSettings.copy(unlockMethod = "volume_up"))
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            LegacySettingsOption("Wrong attempts", selected = currentSettings.unlockMethod == "wrong_attempts") {
-                performHapticFeedback(ctx)
-                onSaveUnlockMethod("wrong_attempts")
-                onUpdateSettings(currentSettings.copy(unlockMethod = "wrong_attempts"))
-            }
-
-            AnimatedVisibility(visible = currentSettings.unlockMethod == "wrong_attempts") {
-                Column {
-                    Spacer(modifier = Modifier.height(20.dp))
-                    Text("Attempts before unlock", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "After this many wrong tries, the next correct PIN unlocks automatically.",
-                        color = Color.White.copy(alpha = 0.65f),
-                        fontSize = 14.sp,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier.size(58.dp)
-                                .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
-                                .clickable {
-                                    performHapticFeedback(ctx)
-                                    val newVal = (currentSettings.wrongAttemptsLimit - 1).coerceAtLeast(1)
-                                    onSaveWrongAttemptsLimit(newVal)
-                                    onUpdateSettings(currentSettings.copy(wrongAttemptsLimit = newVal))
-                                },
-                            contentAlignment = Alignment.Center
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text("−", color = Color.White, fontSize = 28.sp)
-                        }
+                            Box(
+                                modifier = Modifier.size(58.dp)
+                                    .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                                    .clickable {
+                                        performHapticFeedback(ctx)
+                                        val newVal = (currentSettings.wrongAttemptsLimit - 1).coerceAtLeast(1)
+                                        onSaveWrongAttemptsLimit(newVal)
+                                        onUpdateSettings(currentSettings.copy(wrongAttemptsLimit = newVal))
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("−", color = Color.White, fontSize = 28.sp)
+                            }
 
-                        Box(
-                            modifier = Modifier.weight(1f).height(58.dp)
-                                .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                "${currentSettings.wrongAttemptsLimit}",
-                                color = Color.White,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
+                            Box(
+                                modifier = Modifier.weight(1f).height(58.dp)
+                                    .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "${currentSettings.wrongAttemptsLimit}",
+                                    color = Color.White,
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
 
-                        Box(
-                            modifier = Modifier.size(58.dp)
-                                .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
-                                .clickable {
-                                    performHapticFeedback(ctx)
-                                    val newVal = (currentSettings.wrongAttemptsLimit + 1).coerceAtMost(20)
-                                    onSaveWrongAttemptsLimit(newVal)
-                                    onUpdateSettings(currentSettings.copy(wrongAttemptsLimit = newVal))
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("+", color = Color.White, fontSize = 28.sp)
+                            Box(
+                                modifier = Modifier.size(58.dp)
+                                    .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                                    .clickable {
+                                        performHapticFeedback(ctx)
+                                        val newVal = (currentSettings.wrongAttemptsLimit + 1).coerceAtMost(20)
+                                        onSaveWrongAttemptsLimit(newVal)
+                                        onUpdateSettings(currentSettings.copy(wrongAttemptsLimit = newVal))
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("+", color = Color.White, fontSize = 28.sp)
+                            }
                         }
                     }
                 }
             }
+            Spacer(modifier = Modifier.height(14.dp))
 
-            Spacer(modifier = Modifier.height(28.dp))
-            Text("Lock screen display", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-            Spacer(modifier = Modifier.height(12.dp))
-
-            LegacySettingsOption("Date and time", selected = currentSettings.lockScreenTextMode == "date_time") {
-                performHapticFeedback(ctx)
-                onSaveLockScreenTextMode("date_time")
-                val newShownBy = "remove_comma"
-                onSaveUnlockReadyIndicator(newShownBy)
-                onUpdateSettings(
-                    currentSettings.copy(
-                        lockScreenTextMode = "date_time",
-                        unlockReadyIndicator = newShownBy
-                    )
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            LegacySettingsOption("'Enter PIN' message", selected = currentSettings.lockScreenTextMode == "message") {
-                performHapticFeedback(ctx)
-                onSaveLockScreenTextMode("message")
-                onSaveUnlockReadyIndicator("enter_key_dot")
-                onUpdateSettings(
-                    currentSettings.copy(
-                        lockScreenTextMode = "message",
-                        unlockReadyIndicator = "enter_key_dot"
-                    )
-                )
-            }
-
-            Spacer(modifier = Modifier.height(28.dp))
-            Text("Unlock ready indicator", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-            Spacer(modifier = Modifier.height(12.dp))
-
-            LegacySettingsOption(
-                label = "Remove comma from date",
-                selected = currentSettings.unlockReadyIndicator == "remove_comma",
-                enabled = currentSettings.lockScreenTextMode == "date_time"
-            ) {
-                if (currentSettings.lockScreenTextMode == "date_time") {
+            SiUnlockSettingsSection(
+                heading = "Lock screen display",
+                expanded = showDisplay,
+                description = "Choose what is shown on the lock screen.",
+                onClick = {
                     performHapticFeedback(ctx)
-                    onSaveUnlockReadyIndicator("remove_comma")
-                    onUpdateSettings(currentSettings.copy(unlockReadyIndicator = "remove_comma"))
+                    showDisplay = !showDisplay
+                }
+            )
+            if (showDisplay) {
+                Spacer(modifier = Modifier.height(12.dp))
+                LegacySettingsOption("Date and time", selected = currentSettings.lockScreenTextMode == "date_time") {
+                    performHapticFeedback(ctx)
+                    onSaveLockScreenTextMode("date_time")
+                    val newShownBy = "remove_comma"
+                    onSaveUnlockReadyIndicator(newShownBy)
+                    onUpdateSettings(
+                        currentSettings.copy(
+                            lockScreenTextMode = "date_time",
+                            unlockReadyIndicator = newShownBy
+                        )
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                LegacySettingsOption("'Enter PIN' message", selected = currentSettings.lockScreenTextMode == "message") {
+                    performHapticFeedback(ctx)
+                    onSaveLockScreenTextMode("message")
+                    onSaveUnlockReadyIndicator("enter_key_dot")
+                    onUpdateSettings(
+                        currentSettings.copy(
+                            lockScreenTextMode = "message",
+                            unlockReadyIndicator = "enter_key_dot"
+                        )
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+
+            SiUnlockSettingsSection(
+                heading = "Unlock ready indicator",
+                expanded = showReady,
+                description = "Choose how the app shows it is ready for the PIN to be entered.",
+                onClick = {
+                    performHapticFeedback(ctx)
+                    showReady = !showReady
+                }
+            )
+            if (showReady) {
+                Spacer(modifier = Modifier.height(12.dp))
+                LegacySettingsOption(
+                    label = "Remove comma from date",
+                    selected = currentSettings.unlockReadyIndicator == "remove_comma",
+                    enabled = currentSettings.lockScreenTextMode == "date_time"
+                ) {
+                    if (currentSettings.lockScreenTextMode == "date_time") {
+                        performHapticFeedback(ctx)
+                        onSaveUnlockReadyIndicator("remove_comma")
+                        onUpdateSettings(currentSettings.copy(unlockReadyIndicator = "remove_comma"))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                LegacySettingsOption(
+                    label = "Dot on Enter key",
+                    selected = currentSettings.unlockReadyIndicator == "enter_key_dot"
+                ) {
+                    performHapticFeedback(ctx)
+                    onSaveUnlockReadyIndicator("enter_key_dot")
+                    onUpdateSettings(currentSettings.copy(unlockReadyIndicator = "enter_key_dot"))
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+
+            SiUnlockSettingsSection(
+                heading = "Vibrations",
+                expanded = showVibrations,
+                description = "Enable/Disable vibrations on key presses.",
+                onClick = {
+                    performHapticFeedback(ctx)
+                    showVibrations = !showVibrations
+                }
+            )
+            if (showVibrations) {
+                Spacer(modifier = Modifier.height(12.dp))
+                LegacySettingsOption(
+                    label = "Enabled",
+                    selected = currentSettings.hapticFeedbackEnabled
+                ) {
+                    performHapticFeedback(ctx)
+                    onSaveHapticEnabled(true)
+                    onUpdateSettings(currentSettings.copy(hapticFeedbackEnabled = true))
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                LegacySettingsOption(
+                    label = "Disabled",
+                    selected = !currentSettings.hapticFeedbackEnabled
+                ) {
+                    performHapticFeedback(ctx)
+                    onSaveHapticEnabled(false)
+                    onUpdateSettings(currentSettings.copy(hapticFeedbackEnabled = false))
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+
+            SiUnlockSettingsSection(
+                heading = "Background image",
+                expanded = showBackground,
+                description = "Choose an image to use as the lock screen background.",
+                onClick = {
+                    performHapticFeedback(ctx)
+                    showBackground = !showBackground
+                }
+            )
+            if (showBackground) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp)
+                        .background(Color(0xFF1E2D42), RoundedCornerShape(20.dp))
+                        .clickable {
+                            performHapticFeedback(ctx)
+                            imagePicker.launch("image/*")
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    previewBitmap?.let { bmp ->
+                        Image(
+                            bitmap = bmp,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } ?: Text(
+                        "Tap to select image",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 16.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
+                        .clickable {
+                            performHapticFeedback(ctx)
+                            onSaveBackground(null)
+                            onUpdateSettings(currentSettings.copy(backgroundUri = null))
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Reset to default gradient", color = Color.White, fontSize = 15.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(66.dp)
+                    .background(
+                        Brush.verticalGradient(listOf(Color(0xFF20456C), Color(0xFF142D4C))),
+                        RoundedCornerShape(20.dp)
+                    )
+                    .border(1.dp, Color(0xFF35678C), RoundedCornerShape(20.dp))
+                    .clickable(enabled = !isPerforming) {
+                        performHapticFeedback(ctx)
+                        isPerforming = true
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SiUnlockAnimatedLockIcon(progress = lockCloseProgress)
+                    Text("Perform SiUnlock", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            LegacySettingsOption(
-                label = "Dot on Enter key",
-                selected = currentSettings.unlockReadyIndicator == "enter_key_dot"
-            ) {
-                performHapticFeedback(ctx)
-                onSaveUnlockReadyIndicator("enter_key_dot")
-                onUpdateSettings(currentSettings.copy(unlockReadyIndicator = "enter_key_dot"))
-            }
-
-            Spacer(modifier = Modifier.height(28.dp))
-            Text("Vibrations", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-            Spacer(modifier = Modifier.height(12.dp))
-
-            LegacySettingsOption(
-                label = "Enabled",
-                selected = currentSettings.hapticFeedbackEnabled
-            ) {
-                performHapticFeedback(ctx)
-                onSaveHapticEnabled(true)
-                onUpdateSettings(currentSettings.copy(hapticFeedbackEnabled = true))
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            LegacySettingsOption(
-                label = "Disabled",
-                selected = !currentSettings.hapticFeedbackEnabled
-            ) {
-                performHapticFeedback(ctx)
-                onSaveHapticEnabled(false)
-                onUpdateSettings(currentSettings.copy(hapticFeedbackEnabled = false))
-            }
-
-            Spacer(modifier = Modifier.height(28.dp))
-            Text("Background image", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
             Spacer(modifier = Modifier.height(12.dp))
 
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp)
-                    .background(Color(0xFF1E2D42), RoundedCornerShape(20.dp))
-                    .clickable {
-                        performHapticFeedback(ctx)
-                        imagePicker.launch("image/*")
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                previewBitmap?.let { bmp ->
-                    Image(
-                        bitmap = bmp,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
+                    .height(66.dp)
+                    .background(
+                        Brush.verticalGradient(listOf(Color(0xFF20456C), Color(0xFF142D4C))),
+                        RoundedCornerShape(20.dp)
                     )
-                } ?: Text(
-                    "Tap to select image",
-                    color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 16.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .background(Color(0xFF1E2D42), RoundedCornerShape(18.dp))
-                    .clickable {
-                        performHapticFeedback(ctx)
-                        onSaveBackground(null)
-                        onUpdateSettings(currentSettings.copy(backgroundUri = null))
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Reset to default gradient", color = Color.White, fontSize = 15.sp)
-            }
-
-            Spacer(modifier = Modifier.height(36.dp))
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(64.dp)
-                    .background(Color(0xFF2A3A4F), RoundedCornerShape(20.dp))
-                    .clickable {
-                        performHapticFeedback(ctx)
-                        onPerform()
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "Perform SiUnlock",
-                    color = Color.White,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 2.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(58.dp)
-                    .background(Color(0xFF2A3A4F), RoundedCornerShape(18.dp))
+                    .border(1.dp, Color(0xFF35678C), RoundedCornerShape(20.dp))
                     .clickable {
                         performHapticFeedback(ctx)
                         onBack()
                     },
                 contentAlignment = Alignment.Center
             ) {
-                Text("Back to Home Screen", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("⌂", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                    Text("Back to Home Screen", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                }
             }
-
             Spacer(modifier = Modifier.height(32.dp))
         }
+    }
+}
+
+@Composable
+private fun SiUnlockSettingsSection(
+    heading: String,
+    description: String,
+    expanded: Boolean,
+    onClick: () -> Unit
+) {
+    val shape = RoundedCornerShape(22.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 88.dp)
+            .background(
+                Brush.verticalGradient(
+                    if (expanded) listOf(Color(0xFF64B5F6), Color(0xFF64B5F6))
+                    else listOf(Color(0xFF1C3B5D), Color(0xFF142D49))
+                ),
+                shape
+            )
+            .border(1.dp, if (expanded) Color(0xFF64B5F6) else Color(0xFF315B7D), shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(heading, color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(5.dp))
+            Text(description, color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+        }
+    }
+}
+
+@Composable
+private fun SiUnlockAnimatedLockIcon(progress: Float) {
+    Canvas(modifier = Modifier.size(34.dp)) {
+        val unit = size.minDimension / 40f
+        val closure = progress.coerceIn(0f, 1f)
+        // The fixed right-side hinge stays attached to the body. The free end
+        // swings from the right to the left, then is pushed down into the lock.
+        val swing = (closure / 0.7f).coerceIn(0f, 1f)
+        val push = ((closure - 0.7f) / 0.3f).coerceIn(0f, 1f)
+        val hingeX = 27f
+        val freeEndX = 38f + (13f - 38f) * swing
+        val topY = 2.5f + 4f * push
+        val shoulderY = 12f + 4f * push
+        val freeEndY = 14f + 8f * push
+
+        val shackle = Path().apply {
+            moveTo(hingeX * unit, 23f * unit)
+            lineTo(hingeX * unit, shoulderY * unit)
+            cubicTo(
+                hingeX * unit, topY * unit,
+                freeEndX * unit, topY * unit,
+                freeEndX * unit, shoulderY * unit
+            )
+            lineTo(freeEndX * unit, freeEndY * unit)
+        }
+        drawPath(
+            path = shackle,
+            color = Color.White,
+            style = Stroke(width = 3.2f * unit, cap = StrokeCap.Round)
+        )
+        drawRoundRect(
+            color = Color.White,
+            topLeft = Offset(6f * unit, 18f * unit),
+            size = Size(28f * unit, 20f * unit),
+            cornerRadius = CornerRadius(4f * unit)
+        )
+        drawRoundRect(
+            color = Color(0xFF19395B),
+            topLeft = Offset(18f * unit, 25f * unit),
+            size = Size(4f * unit, 7f * unit),
+            cornerRadius = CornerRadius(2f * unit)
+        )
     }
 }
 
