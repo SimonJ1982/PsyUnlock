@@ -2082,7 +2082,7 @@ fun LockScreenEntry(
                 } else {
                     wrongAttemptCount.intValue += 1
                     clearPin()
-                    statusMessage = "Wrong PIN. try again"
+                    statusMessage = "Wrong PIN. Try again"
                 }
             }
 
